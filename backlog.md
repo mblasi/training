@@ -8,7 +8,7 @@ _Nada por ahora._
 
 ## 👀 En revisión
 
-- [ ] [#3](https://github.com/mblasi/training/issues/3) backlog new: agente entrevistador que especifica el issue antes de crearlo · feat · @mblasi
+_Nada por ahora._
 
 ## 📋 Pendiente
 
@@ -16,4 +16,5 @@ _Nada por ahora._
 
 ## ✅ Hecho
 
+- [x] [#3](https://github.com/mblasi/training/issues/3) backlog new: agente entrevistador que especifica el issue antes de crearlo · feat · @mblasi
 - [x] [#1](https://github.com/mblasi/training/issues/1) Harness de gestión de issues: backlog.py + backlog.md sincronizado · chore · @mblasi
