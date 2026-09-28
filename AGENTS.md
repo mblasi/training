@@ -23,7 +23,10 @@ Este documento define el workflow y convenciones que todos los agentes de códig
 python3 scripts/backlog.py take <N>
 ```
 
-Este comando:
+Este comando ejecuta el flujo completo: **diseño → aprobación → implementación TDD**.
+
+**Fase 1: Diseño**
+
 - Verifica que el working tree esté limpio
 - Verifica que el issue esté abierto y no WIP por otra persona
 - Hace checkout a `main` y pull
@@ -32,18 +35,120 @@ Este comando:
 - Cambia el label de `status:todo` a `status:wip`
 - Pushea la rama
 - Comenta en el issue: "🚧 Tomado. Rama: `issue/...`"
+- Arranca una **entrevista con el agente Tech Lead** para diseñar la implementación
+  - El agente lee el issue, DESIGN.md, AGENTS.md y el código existente
+  - Propone un diseño inicial
+  - Presenta decisiones técnicas en tandas de 1-3, con opciones y recomendaciones
+  - Pregunta sobre: estructura de archivos, librerías, contratos, modelo de datos, testing, manejo de errores
+  - No hay decisiones implícitas: todo se acuerda explícitamente
+- Al finalizar, el agente genera una **especificación JSON** con:
+  - Resumen del diseño
+  - Tabla de decisiones acordadas
+  - Archivos a crear/modificar
+  - Tareas divididas en unidades pequeñas (cada una con tests específicos)
+  - Comando de test (`test_command`)
+  - Riesgos y fuera de alcance
+- **Preview y aprobación**: se muestra la spec renderizada y se ofrecen opciones:
+  - **[a]probar**: guarda la spec en `docs/specs/issue-N.md`, la commitea, y publica un comentario en el issue. Después arranca automáticamente la fase de implementación TDD.
+  - **[e]ditar**: edita la spec en `$EDITOR` y re-valida
+  - **[s]eguir**: continúa conversando con el agente para ajustar el diseño
+  - **[x] salir**: guarda como draft en `docs/specs/issue-N.md` (estado `draft`). Se puede retomar después corriendo `take <N>` de nuevo.
 
-### 2. Implementar
+**Fase 2: Implementación TDD**
 
-- Hacer los cambios necesarios en la rama `issue/<N>-...`
-- Commits pequeños y atómicos
-- Mensajes en formato: `type: description (#N)` (conventional commits + número de issue)
-  - Tipos: `feat`, `fix`, `chore`, `docs`, `test`, `refactor`, `style`, `perf`, `ci`, `build`
-  - Ejemplo: `feat: add user registration form (#42)`
-- Correr tests: `python3 -m unittest discover -s tests -v`
-- Nunca hacer `git commit --no-verify` ni saltear hooks
+Si la spec fue aprobada (o ya está en estado `approved` o `implementing`), el harness ejecuta automáticamente:
 
-### 3. Crear PR
+Para cada tarea pendiente, en orden:
+1. **RED**: invoca al agente de código (configurable con `BACKLOG_CODER_CMD` y `BACKLOG_CODER_MODEL`) con la spec y la tarea: "escribí SOLO los tests de esta tarea, no toques código de producción". Verifica:
+   - Solo se modifican archivos de test
+   - Los tests **deben fallar** (si pasan, reintenta una vez y después pregunta al usuario)
+   - En el primer RED, muestra el output y pide confirmar que no es un error de infraestructura
+   - Commit: `test: <tarea> (#N)`
+2. **GREEN**: invoca al agente: "implementá lo mínimo para que pasen los tests, sin modificar los tests". Verifica:
+   - Los tests **deben pasar** completos (sin regresiones)
+   - Los archivos de test no cambiaron desde RED
+   - Hasta 3 intentos con el output de los tests como feedback
+   - Commit: `feat|fix: <tarea> (#N)` según el type del issue
+3. **REFACTOR** (opcional): invoca al agente: "refactorizá si es necesario (o respondé SIN_REFACTOR)". Si hay cambios, verifica que los tests sigan pasando; si fallan, revierte. Commit: `refactor: <tarea> (#N)`.
+4. El progreso de cada fase se marca en `docs/specs/issue-N.md` con checkboxes.
+
+**Detección de desviaciones (`/DESVIO`):**
+
+Si el agente de código necesita tomar una decisión no prevista en la spec, debe escribir una línea `/DESVIO <explicación>` y frenar. El harness:
+- Revierte los cambios no commiteados
+- Muestra la explicación al usuario y pide una decisión
+- Agrega la decisión a la spec como nueva entrada (`D2`, `D3`, ...)
+- Commitea: `docs: decisión durante implementación (#N)`
+- Reintenta la fase
+
+**Al terminar:**
+
+- Todos los tests pasan
+- Spec en estado `done`
+- Commit: `docs: spec completada (#N)`
+- Mensaje: "Siguiente paso: `python3 scripts/backlog.py pr N`"
+
+**Flags opcionales:**
+
+- `--plan-only`: solo ejecuta la fase de diseño, no implementa
+- `--no-plan`: comportamiento legacy (solo rama y WIP, sin diseño ni TDD)
+
+**Comandos relacionados:**
+
+```bash
+python3 scripts/backlog.py impl <N>
+```
+
+Ejecuta solo la fase de implementación TDD (la spec debe estar en estado `approved` o `implementing`). Útil si interrumpiste `take` después de aprobar.
+
+### 2. Variables de entorno
+
+**Para el Tech Lead (fase de diseño):**
+
+- `BACKLOG_LLM_BASE_URL`: URL de la API de LLM (default: `https://inference-api.nousresearch.com/v1`)
+- `BACKLOG_LLM_MODEL`: Modelo a usar (default: `anthropic/claude-sonnet-4.6`)
+- `NOUS_API_KEY`: API key (se lee de env o `~/.config/model-keys.env`)
+
+**Para el agente de código (fase TDD):**
+
+- `BACKLOG_CODER_CMD`: Comando para invocar el coder (default: `~/.local/bin/oc run`)
+- `BACKLOG_CODER_MODEL`: Modelo para el coder (default: `nous/anthropic/claude-sonnet-4.5`). Si está vacío, no se agrega flag `--model`.
+- `BACKLOG_CODER_TIMEOUT`: Timeout en segundos para cada invocación del coder (default: `1800`)
+
+**Logs:**
+
+- Sesiones de diseño: `.backlog/sessions/<timestamp>.json` y `.md`
+- Logs de TDD: `.backlog/runs/issue-N/<task>-<fase>-<intento>.log`
+
+### 3. Estructura de specs
+
+Las specs se guardan en `docs/specs/issue-N.md` y tienen:
+
+**Front matter:**
+
+```yaml
+---
+issue: N
+status: draft|approved|implementing|done
+test_command: python3 -m unittest discover -s tests -v
+---
+```
+
+**Cuerpo:**
+
+- Resumen
+- Tabla de decisiones de diseño
+- Archivos afectados
+- Tareas con checkboxes de progreso:
+  - `[ ] RED: tests escritos y fallan`
+  - `[ ] GREEN: tests pasan`
+  - `[ ] REFACTOR: código limpio`
+- Fuera de alcance
+- Riesgos
+
+Las specs se commitean en la rama del issue y se revisan en el PR.
+
+### 4. Crear PR
 
 ```bash
 python3 scripts/backlog.py pr <N> [--draft]
@@ -56,7 +161,7 @@ Este comando:
 - Body del PR incluye "Closes #N" y resumen de commits
 - Cambia label del issue de `status:wip` a `status:review`
 
-### 4. Merge
+### 5. Merge
 
 ```bash
 python3 scripts/backlog.py merge <N>

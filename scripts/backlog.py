@@ -482,7 +482,7 @@ def cmd_list(args):
 
 
 def cmd_take(args):
-    """Take an issue: create branch, assign, mark WIP."""
+    """Take an issue: create branch, assign, mark WIP, optionally run design phase."""
     issue_num = args.issue
     
     if not is_working_tree_clean():
@@ -547,6 +547,179 @@ def cmd_take(args):
     ])
     
     print(f"Issue #{issue_num} is now WIP on branch {branch_name}")
+    
+    # If --no-plan, stop here (legacy behavior)
+    if args.no_plan:
+        return
+    
+    # Design phase
+    repo_root = git_toplevel()
+    specs_dir = Path(repo_root) / "docs" / "specs"
+    specs_dir.mkdir(parents=True, exist_ok=True)
+    spec_file = specs_dir / f"issue-{issue_num}.md"
+    
+    # Check if spec already exists
+    spec_status = None  # Track spec status to decide if we should implement
+    
+    if spec_file.exists():
+        # Parse status
+        try:
+            import take_agent
+        except ImportError:
+            sys.path.insert(0, str(Path(__file__).parent))
+            import take_agent
+        
+        with open(spec_file, "r", encoding="utf-8") as f:
+            content = f.read()
+        
+        metadata, spec, progress = take_agent.parse_spec_markdown(content)
+        status = metadata.get("status", "draft")
+        
+        if status == "draft":
+            print("\nSpec en draft encontrada. Retomando diseño...")
+            # Resume design phase (load session if available)
+        elif status == "approved":
+            print(f"\nSpec aprobada en {spec_file}")
+            if getattr(args, 'plan_only', False):
+                return
+            # Run TDD implementation
+            spec_status = "approved"
+            # Skip design, go to implementation
+        elif status == "implementing":
+            print(f"\nImplementación en progreso. Spec: {spec_file}")
+            if getattr(args, 'plan_only', False):
+                return
+            # Resume TDD phase
+            spec_status = "implementing"
+            # Skip design, go to implementation
+        elif status == "done":
+            print(f"\nImplementación completa. Spec: {spec_file}")
+            print(f"Para crear el PR, corré: python3 scripts/backlog.py pr {issue_num}")
+            return
+        
+        # If spec is approved or implementing, skip design and go to implementation
+        if spec_status in ["approved", "implementing"]:
+            pass  # Will run implementation phase below
+        elif spec_status != "draft":
+            # Unknown status, abort
+            print(f"Estado desconocido: {spec_status}")
+            return
+    
+    # Run design phase (if spec not already approved/implementing)
+    if spec_status not in ["approved", "implementing"]:
+        print("\n" + "=" * 80)
+        print("FASE DE DISEÑO")
+        print("=" * 80)
+        print()
+        
+        try:
+            import take_agent
+        except ImportError:
+            sys.path.insert(0, str(Path(__file__).parent))
+            import take_agent
+        
+        # Get LLM config
+        try:
+            import agent_core
+            base_url, api_key, model = agent_core.get_llm_config()
+        except ValueError as e:
+            print(f"Error: {e}", file=sys.stderr)
+            sys.exit(1)
+        
+        client = agent_core.LLMClient(base_url, api_key, model)
+        sandbox = agent_core.ToolSandbox(repo_root)
+        
+        # Load full issue (with comments)
+        full_issue = take_agent.load_issue(issue_num)
+        
+        # Run design interview
+        spec, messages, session_id = take_agent.run_design_phase(
+            client, sandbox, repo_root, full_issue
+        )
+        
+        if not spec:
+            print("Diseño cancelado o sin resultado.")
+            return
+        
+        # Preview and approval loop
+        spec, approval_status = take_agent.review_and_approve(
+            spec=spec,
+            issue=full_issue,
+            spec_file=spec_file,
+            branch_name=branch_name,
+            repo_root=repo_root,
+            run_command=run_command
+        )
+        
+        if approval_status == "approved":
+            spec_status = "approved"
+        elif approval_status == "draft":
+            # Saved as draft, exit
+            return
+        else:
+            # Cancelled or error
+            return
+    
+    if getattr(args, 'plan_only', False):
+        print("\n(--plan-only: fase de implementación omitida)")
+        return
+    
+    # Phase 2: TDD implementation
+    # Check if spec is approved or implementing
+    if not spec_status or spec_status not in ["approved", "implementing"]:
+        # Spec not ready yet (saved as draft or not created)
+        return
+    
+    from tdd_runner import run_tdd_implementation
+    
+    print("\n=== Fase de implementación TDD ===\n")
+    success = run_tdd_implementation(repo_root=".", issue_num=issue_num)
+    
+    if not success:
+        print("\nImplementación detenida.")
+        return
+    
+    print(f"\n✓ Implementación completa. Siguiente paso: python3 scripts/backlog.py pr {issue_num}")
+
+
+def cmd_impl(args):
+    """Run TDD implementation phase for an issue (requires approved spec)."""
+    issue_num = args.issue
+    spec_path = Path("docs") / "specs" / f"issue-{issue_num}.md"
+    
+    if not spec_path.exists():
+        print(f"Error: spec no encontrada en {spec_path}", file=sys.stderr)
+        print("Primero ejecutá: python3 scripts/backlog.py take <N>")
+        sys.exit(1)
+    
+    # Check spec status
+    with open(spec_path, "r", encoding="utf-8") as f:
+        spec_content = f.read()
+    
+    from take_agent import parse_spec_markdown
+    metadata, spec, progress = parse_spec_markdown(spec_content)
+    spec_status = metadata.get("status", "")
+    
+    if spec_status == "done":
+        print(f"Issue #{issue_num} ya está completo.")
+        print(f"Siguiente paso: python3 scripts/backlog.py pr {issue_num}")
+        return
+    
+    if spec_status not in ["approved", "implementing"]:
+        print(f"Error: especificación debe estar en estado 'approved' o 'implementing', está en '{spec_status}'", file=sys.stderr)
+        print("Primero completá la fase de diseño con: python3 scripts/backlog.py take <N>")
+        sys.exit(1)
+    
+    from tdd_runner import run_tdd_implementation
+    
+    print(f"\n=== Implementando issue #{issue_num} ===\n")
+    success = run_tdd_implementation(repo_root=".", issue_num=issue_num)
+    
+    if not success:
+        print("\nImplementación detenida.")
+        sys.exit(1)
+    
+    print(f"\n✓ Implementación completa. Siguiente paso: python3 scripts/backlog.py pr {issue_num}")
 
 
 def cmd_pr(args):
@@ -885,6 +1058,12 @@ def main():
     # take
     take_parser = subparsers.add_parser("take", help="Take an issue")
     take_parser.add_argument("issue", type=int, help="Issue number")
+    take_parser.add_argument("--plan-only", action="store_true", help="Only run design phase, skip implementation")
+    take_parser.add_argument("--no-plan", action="store_true", help="Skip design phase (legacy behavior)")
+    
+    # impl
+    impl_parser = subparsers.add_parser("impl", help="Run TDD implementation for issue (spec must be approved)")
+    impl_parser.add_argument("issue", type=int, help="Issue number")
     
     # pr
     pr_parser = subparsers.add_parser("pr", help="Create PR for issue")
@@ -913,6 +1092,7 @@ def main():
         "new": cmd_new,
         "list": cmd_list,
         "take": cmd_take,
+        "impl": cmd_impl,
         "pr": cmd_pr,
         "merge": cmd_merge,
         "render": cmd_render,

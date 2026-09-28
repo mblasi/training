@@ -15,11 +15,17 @@ Este proyecto usa un workflow basado en GitHub Issues manejado por `scripts/back
 # Ver issues disponibles
 python3 scripts/backlog.py list
 
-# Tomar un issue
+# Crear nuevo issue (modo interactivo con agente IA)
+python3 scripts/backlog.py new
+
+# Tomar un issue (diseño + implementación TDD automática)
 python3 scripts/backlog.py take <N>
 
-# Ver estado actual
-python3 scripts/backlog.py status
+# Solo diseño (sin implementar)
+python3 scripts/backlog.py take <N> --plan-only
+
+# Solo implementación (spec ya aprobada)
+python3 scripts/backlog.py impl <N>
 
 # Crear PR
 python3 scripts/backlog.py pr <N>
@@ -27,11 +33,8 @@ python3 scripts/backlog.py pr <N>
 # Mergear PR
 python3 scripts/backlog.py merge <N>
 
-# Crear nuevo issue (modo interactivo con agente IA)
-python3 scripts/backlog.py new
-
-# Crear issue directo (sin entrevista)
-python3 scripts/backlog.py new "Título" --type feat --no-interview
+# Ver estado actual
+python3 scripts/backlog.py status
 
 # Ver todos los comandos
 python3 scripts/backlog.py --help
@@ -39,10 +42,12 @@ python3 scripts/backlog.py --help
 
 ### Workflow completo
 
-1. `take <N>` → crea rama `issue/<N>-<slug>`, asigna issue, marca como WIP
-2. Implementar en la rama, commits con formato `type: description (#N)`
-3. Correr tests: `python3 -m unittest discover -s tests -v`
-4. `pr <N>` → crea PR, marca issue como en revisión
-5. `merge <N>` → squash merge, cierra issue, vuelve a main
+1. `new` → entrevista con agente Analista, crea issue estructurado
+2. `take <N>` → crea rama, diseño interactivo con agente Tech Lead, genera spec, implementación TDD automática
+   - Fase de diseño: entrevista para acordar decisiones técnicas, genera `docs/specs/issue-N.md`
+   - Fase TDD: RED → GREEN → REFACTOR por cada tarea, verificado por el harness
+   - Specs y progreso se commitean en la rama
+3. `pr <N>` → crea PR, marca issue como en revisión
+4. `merge <N>` → squash merge, cierra issue, vuelve a main
 
 Ver [AGENTS.md](AGENTS.md) para documentación completa y convenciones.

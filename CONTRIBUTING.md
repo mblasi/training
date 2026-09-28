@@ -10,12 +10,20 @@ Gracias por contribuir al proyecto. Este documento resume el workflow de desarro
 
 ## Flujo de trabajo (resumen)
 
-1. **Tomar un issue**: `python3 scripts/backlog.py take <N>`
-2. **Implementar** en la rama `issue/<N>-<slug>`
-3. **Commitear** cambios con mensajes en formato: `type: description (#N)`
-4. **Correr tests**: `python3 -m unittest discover -s tests -v`
-5. **Crear PR**: `python3 scripts/backlog.py pr <N>`
-6. **Mergear** (después de review): `python3 scripts/backlog.py merge <N>`
+1. **Crear issue** (opcional): `python3 scripts/backlog.py new` (modo interactivo con IA)
+2. **Tomar un issue**: `python3 scripts/backlog.py take <N>`
+   - Crea rama `issue/<N>-<slug>`, marca como WIP
+   - **Fase de diseño**: entrevista interactiva con agente Tech Lead
+   - Genera `docs/specs/issue-N.md` con decisiones acordadas
+   - **Fase TDD**: implementación automática con ciclo RED → GREEN → REFACTOR
+   - Todos los tests pasan al finalizar
+3. **Crear PR**: `python3 scripts/backlog.py pr <N>`
+4. **Mergear** (después de review): `python3 scripts/backlog.py merge <N>`
+
+Comandos opcionales:
+- `take <N> --plan-only`: solo diseño, sin implementación
+- `impl <N>`: solo implementación (si spec ya aprobada)
+- `take <N> --no-plan`: comportamiento legacy (sin diseño ni TDD)
 
 ## Convenciones
 
@@ -32,11 +40,28 @@ Ver `AGENTS.md` para documentación completa del workflow, comandos disponibles,
 
 ## Crear nuevo issue
 
-Preferible usar GitHub UI con los templates, o bien:
+**Modo recomendado (interactivo con IA):**
 
 ```bash
-python3 scripts/backlog.py new "Título" --type {feat|fix|chore|docs|infra}
+python3 scripts/backlog.py new ["idea inicial opcional"]
 ```
+
+El agente Analista te entrevista y genera una especificación completa.
+
+**Modo directo (sin entrevista):**
+
+```bash
+python3 scripts/backlog.py new "Título" --type {feat|fix|chore|docs|infra} --no-interview
+```
+
+## /DESVIO: regla para agentes de código
+
+Si durante la implementación TDD el agente de código necesita tomar una decisión no prevista en la spec, debe:
+
+1. Escribir una línea `/DESVIO <explicación>` en su output
+2. Frenar sin hacer cambios
+
+El harness detectará el desvío, preguntará al usuario, registrará la decisión en la spec, y reintentará la fase.
 
 ## Soporte
 
