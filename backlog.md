@@ -4,11 +4,11 @@
 
 ## 🚧 En curso (WIP)
 
-- [ ] [#5](https://github.com/mblasi/training/issues/5) backlog take: spec de implementación acordada con el usuario + implementación TDD controlada por el harness · feat · @mblasi
+_Nada por ahora._
 
 ## 👀 En revisión
 
-_Nada por ahora._
+- [ ] [#5](https://github.com/mblasi/training/issues/5) backlog take: spec de implementación acordada con el usuario + implementación TDD controlada por el harness · feat · @mblasi
 
 ## 📋 Pendiente
 
