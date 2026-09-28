@@ -1,6 +1,6 @@
-# training
+# Trainia
 
-App de entrenamiento autogestionada con un equipo de agentes IA (entrenador, nutricionista, psicólogo deportivo).
+Trainia (trainia.blasi.ar): app de entrenamiento autogestionada con un equipo de agentes IA (entrenador, nutricionista, psicólogo deportivo).
 
 - Diseño: [docs/DESIGN.md](docs/DESIGN.md)
 - Backlog: [backlog.md](backlog.md)
