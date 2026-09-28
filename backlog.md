@@ -4,7 +4,7 @@
 
 ## 🚧 En curso (WIP)
 
-_Nada por ahora._
+- [ ] [#3](https://github.com/mblasi/training/issues/3) backlog new: agente entrevistador que especifica el issue antes de crearlo · feat · @mblasi
 
 ## 👀 En revisión
 
@@ -12,9 +12,7 @@ _Nada por ahora._
 
 ## 📋 Pendiente
 
-### Fase 0 - Fundaciones
-
-- [ ] [#3](https://github.com/mblasi/training/issues/3) backlog new: agente entrevistador que especifica el issue antes de crearlo · feat · @mblasi
+_Nada por ahora._
 
 ## ✅ Hecho
 
