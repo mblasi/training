@@ -14,7 +14,7 @@ _Nada por ahora._
 
 ### Fase 0 - Fundaciones
 
-- [ ] [#5](https://github.com/mblasi/training/issues/5) backlog take: spec de implementación acordada con el usuario + implementación TDD controlada por el harness · feat
+- [ ] [#5](https://github.com/mblasi/training/issues/5) backlog take: spec de implementación acordada con el usuario + implementación TDD controlada por el harness · feat · @mblasi
 
 ## ✅ Hecho
 
