@@ -20,6 +20,14 @@ def run_command(cmd: list[str], cwd: str | None = None, check: bool = True) -> s
     return subprocess.run(cmd, cwd=cwd, check=check, capture_output=True, text=True)
 
 
+def ask(prompt: str, default: str = "") -> str:
+    """Safe wrapper for input() that handles EOF/KeyboardInterrupt gracefully."""
+    try:
+        return input(prompt).strip()
+    except (EOFError, KeyboardInterrupt):
+        return default
+
+
 def git_toplevel() -> str:
     """Get the repository root directory."""
     result = run_command(["git", "rev-parse", "--show-toplevel"])
@@ -343,7 +351,7 @@ def cmd_new(args):
         print("  [s] Seguir entrevistando")
         print("  [x] Cancelar")
         
-        choice = input("\n> ").strip().lower()
+        choice = ask("\n> ").lower()
         
         if choice == "c":
             # Create issues
@@ -394,7 +402,7 @@ def cmd_new(args):
                     print(f"  [{i}] {iss['title']}")
                 
                 try:
-                    idx = int(input("> ").strip())
+                    idx = int(ask("> "))
                     if idx == 0:
                         continue
                     if idx < 1 or idx > len(issues):
@@ -418,7 +426,7 @@ def cmd_new(args):
         elif choice == "s":
             # Continue interview
             print("\nContinuando entrevista. Escribí tu pregunta o ajuste:\n")
-            user_msg = input("> ").strip()
+            user_msg = ask("> ")
             if not user_msg:
                 print("Cancelado.")
                 continue
@@ -815,11 +823,16 @@ def cmd_merge(args):
     # Check PR checks
     result = run_command(["gh", "pr", "checks", str(pr_number)], check=False)
     if "fail" in result.stdout.lower():
-        print(f"Warning: PR #{pr_number} has failing checks:", file=sys.stderr)
-        print(result.stdout, file=sys.stderr)
-        response = input("Continue anyway? [y/N] ")
-        if response.lower() != "y":
-            sys.exit(1)
+        if args.force:
+            print(f"Warning: PR #{pr_number} has failing checks (--force specified, continuing):", file=sys.stderr)
+            print(result.stdout, file=sys.stderr)
+        else:
+            print(f"Warning: PR #{pr_number} has failing checks:", file=sys.stderr)
+            print(result.stdout, file=sys.stderr)
+            response = ask("Continue anyway? [y/N] ", default="n")
+            if response.lower() != "y":
+                print("Merge aborted.", file=sys.stderr)
+                sys.exit(1)
     
     # Merge PR
     run_command(["gh", "pr", "merge", str(pr_number), "--squash", "--delete-branch"])
@@ -1073,6 +1086,7 @@ def main():
     # merge
     merge_parser = subparsers.add_parser("merge", help="Merge PR for issue")
     merge_parser.add_argument("issue", type=int, help="Issue number")
+    merge_parser.add_argument("--force", action="store_true", help="Skip confirmation prompts")
     
     # render
     render_parser = subparsers.add_parser("render", help="Render backlog.md")

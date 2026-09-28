@@ -384,9 +384,9 @@ class TestIssueAgent(unittest.TestCase):
         """Test that ToolSandbox rejects paths outside repo."""
         sandbox = issue_agent.ToolSandbox(str(repo_root))
         
-        # Valid path
+        # Valid path (relative)
         try:
-            sandbox._validate_path("README.md")
+            sandbox._validate_path("some_file.txt")
         except ValueError:
             self.fail("Valid path rejected")
         
@@ -399,10 +399,15 @@ class TestIssueAgent(unittest.TestCase):
     
     def test_tool_sandbox_read_file(self):
         """Test reading a file through sandbox."""
-        sandbox = issue_agent.ToolSandbox(str(repo_root))
-        content = sandbox.read_file("README.md")
-        self.assertIn("training", content)
-        self.assertNotIn("Error", content)
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmpdir:
+            test_file = Path(tmpdir) / "test.txt"
+            test_file.write_text("Hello from sandbox test")
+            
+            sandbox = issue_agent.ToolSandbox(tmpdir)
+            content = sandbox.read_file("test.txt")
+            self.assertIn("Hello from sandbox test", content)
+            self.assertNotIn("Error", content)
     
     def test_tool_sandbox_read_nonexistent(self):
         """Test reading nonexistent file returns error."""
@@ -502,6 +507,98 @@ class TestScriptsSyntax(unittest.TestCase):
                     py_compile.compile(str(script_file), doraise=True)
                 except py_compile.PyCompileError as e:
                     self.fail(f"Syntax error in {script_file.name}: {e}")
+
+
+class TestAskHelper(unittest.TestCase):
+    """Test the ask() helper function for EOF-safe input."""
+    
+    def test_ask_normal_input(self):
+        """Test that ask() returns stripped input in normal case."""
+        with unittest.mock.patch('builtins.input', return_value="  hello  "):
+            result = backlog.ask("prompt> ")
+            self.assertEqual(result, "hello")
+    
+    def test_ask_eof_returns_default(self):
+        """Test that ask() returns default on EOF."""
+        with unittest.mock.patch('builtins.input', side_effect=EOFError):
+            result = backlog.ask("prompt> ", default="default_value")
+            self.assertEqual(result, "default_value")
+    
+    def test_ask_keyboard_interrupt_returns_default(self):
+        """Test that ask() returns default on KeyboardInterrupt."""
+        with unittest.mock.patch('builtins.input', side_effect=KeyboardInterrupt):
+            result = backlog.ask("prompt> ", default="no")
+            self.assertEqual(result, "no")
+    
+    def test_ask_eof_empty_default(self):
+        """Test that ask() returns empty string when no default provided."""
+        with unittest.mock.patch('builtins.input', side_effect=EOFError):
+            result = backlog.ask("prompt> ")
+            self.assertEqual(result, "")
+
+
+class TestMergeAbort(unittest.TestCase):
+    """Test that cmd_merge aborts cleanly on EOF when checks fail."""
+    
+    def test_merge_abort_on_eof(self):
+        """Test that cmd_merge exits with code 1 when user confirms 'no' via EOF."""
+        # Mock all the run_command calls and ask()
+        with unittest.mock.patch.object(backlog, 'run_command') as mock_run:
+            with unittest.mock.patch.object(backlog, 'ask', return_value='n') as mock_ask:
+                with unittest.mock.patch.object(backlog, 'get_default_branch', return_value='main'):
+                    # Setup mocks
+                    pr_result = unittest.mock.MagicMock()
+                    pr_result.stdout = '[{"number": 42, "url": "http://test", "headRefName": "issue/7-test"}]'
+                    
+                    checks_result = unittest.mock.MagicMock()
+                    checks_result.stdout = 'Some checks failed\nFAIL: test'
+                    
+                    mock_run.side_effect = [pr_result, checks_result]
+                    
+                    # Create mock args
+                    args = unittest.mock.MagicMock()
+                    args.issue = 7
+                    args.force = False
+                    
+                    # Should exit with code 1
+                    with self.assertRaises(SystemExit) as cm:
+                        backlog.cmd_merge(args)
+                    
+                    self.assertEqual(cm.exception.code, 1)
+                    mock_ask.assert_called_once()
+    
+    def test_merge_force_skips_prompt(self):
+        """Test that cmd_merge with --force skips prompt even when checks fail."""
+        with unittest.mock.patch.object(backlog, 'run_command') as mock_run:
+            with unittest.mock.patch.object(backlog, 'ask') as mock_ask:
+                with unittest.mock.patch.object(backlog, 'get_default_branch', return_value='main'):
+                    # Setup mocks with proper result objects
+                    pr_result = unittest.mock.MagicMock()
+                    pr_result.stdout = '[{"number": 42, "url": "http://test", "headRefName": "issue/7-test"}]'
+                    
+                    checks_result = unittest.mock.MagicMock()
+                    checks_result.stdout = 'Some checks failed\nFAIL: test'
+                    
+                    merge_result = unittest.mock.MagicMock()
+                    merge_result.stdout = ''
+                    
+                    checkout_result = unittest.mock.MagicMock()
+                    checkout_result.stdout = ''
+                    
+                    pull_result = unittest.mock.MagicMock()
+                    pull_result.stdout = ''
+                    
+                    mock_run.side_effect = [pr_result, checks_result, merge_result, checkout_result, pull_result]
+                    
+                    args = unittest.mock.MagicMock()
+                    args.issue = 7
+                    args.force = True
+                    
+                    # Should NOT exit, should proceed with merge
+                    backlog.cmd_merge(args)
+                    
+                    # ask() should NOT have been called
+                    mock_ask.assert_not_called()
 
 
 if __name__ == "__main__":
