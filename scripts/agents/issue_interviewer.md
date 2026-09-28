@@ -96,8 +96,10 @@ Cuando el usuario dice `/listo` o cuando creés que ya tenés suficiente informa
 
 ## Formato de salida final
 
-Cuando esté todo listo, generá la especificación final en este formato JSON:
+Cuando esté todo listo, generá la especificación final **precedida por la línea `/SPEC` exactamente**, seguida de un bloque de código JSON:
 
+```
+/SPEC
 ```json
 {
   "issues": [
@@ -111,6 +113,9 @@ Cuando esté todo listo, generá la especificación final en este formato JSON:
   ]
 }
 ```
+```
+
+**Importante**: La especificación debe estar exactamente en este formato: primero una línea con `/SPEC`, luego un bloque ```json con el objeto JSON. Sin este formato exacto, la especificación no será reconocida.
 
 Si detectaste que el issue debe partirse en varios, incluí múltiples elementos en el array `issues`.
 

@@ -314,16 +314,20 @@ class TestIssueAgent(unittest.TestCase):
     """Test issue_agent module functionality."""
     
     def test_parse_final_spec_json(self):
-        """Test JSON parsing from agent response."""
-        json_text = '{"issues": [{"title": "Test", "type": "feat", "body": "Body"}]}'
-        result = issue_agent.parse_final_spec(json_text)
+        """Test JSON parsing from agent response with /SPEC marker."""
+        text = '''/SPEC
+```json
+{"issues": [{"title": "Test", "type": "feat", "body": "Body"}]}
+```'''
+        result = issue_agent.parse_final_spec(text)
         self.assertIsNotNone(result)
         self.assertEqual(len(result["issues"]), 1)
         self.assertEqual(result["issues"][0]["title"], "Test")
     
     def test_parse_final_spec_with_fence(self):
-        """Test JSON parsing from markdown code fence."""
+        """Test JSON parsing from markdown code fence with /SPEC."""
         text = '''Here is the spec:
+/SPEC
 ```json
 {"issues": [{"title": "Test", "type": "feat", "body": "Body"}]}
 ```
@@ -424,6 +428,7 @@ class TestIssueAgent(unittest.TestCase):
             "role": "assistant",
             "content": '''Perfecto, aquí está la especificación:
 
+/SPEC
 ```json
 {
   "issues": [
@@ -457,7 +462,7 @@ class TestIssueAgent(unittest.TestCase):
         
         sandbox = issue_agent.ToolSandbox(str(repo_root))
         
-        spec = issue_agent.run_interview(
+        spec, messages, session_id = issue_agent.run_interview(
             mock_client,
             sandbox,
             str(repo_root),

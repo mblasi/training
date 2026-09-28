@@ -73,16 +73,18 @@ class ToolSandbox:
     
     def read_file(self, path: str) -> str:
         """Read a file from the repo."""
-        full_path = self._validate_path(path)
-        if not full_path.is_file():
-            return f"Error: {path} is not a file"
         try:
+            full_path = self._validate_path(path)
+            if not full_path.is_file():
+                return f"Error: {path} is not a file"
             with open(full_path, "r", encoding="utf-8") as f:
                 content = f.read()
                 # Truncate large files
                 if len(content) > 50000:
                     return content[:50000] + f"\n\n... (truncated, {len(content)} total chars)"
                 return content
+        except ValueError as e:
+            return f"Error: {e}"
         except Exception as e:
             return f"Error reading {path}: {e}"
     
@@ -202,17 +204,29 @@ class ToolSandbox:
         ]
     
     def execute_tool(self, name: str, arguments: dict[str, Any]) -> str:
-        """Execute a tool and return result."""
-        if name == "read_file":
-            return self.read_file(arguments["path"])
-        elif name == "search":
-            return self.search(arguments["pattern"])
-        elif name == "list_issues":
-            return self.list_issues()
-        elif name == "view_issue":
-            return self.view_issue(arguments["number"])
-        else:
-            return f"Unknown tool: {name}"
+        """Execute a tool and return result. Returns error string instead of raising."""
+        try:
+            if name == "read_file":
+                if "path" not in arguments:
+                    return "Error: missing 'path' argument"
+                return self.read_file(arguments["path"])
+            elif name == "search":
+                if "pattern" not in arguments:
+                    return "Error: missing 'pattern' argument"
+                return self.search(arguments["pattern"])
+            elif name == "list_issues":
+                return self.list_issues()
+            elif name == "view_issue":
+                if "number" not in arguments:
+                    return "Error: missing 'number' argument"
+                return self.view_issue(arguments["number"])
+            else:
+                return f"Error: unknown tool '{name}'"
+        except ValueError as e:
+            # Path validation errors
+            return f"Error: {e}"
+        except Exception as e:
+            return f"Error executing {name}: {e}"
 
 
 def load_prompt(repo_root: str) -> str:
@@ -290,27 +304,22 @@ def get_repo_context(repo_root: str) -> str:
 def parse_final_spec(text: str) -> dict[str, Any] | None:
     """
     Extract JSON spec from agent response.
-    Handles markdown code fences and tries to parse robustly.
+    Requires /SPEC marker followed by a ```json fenced block.
     """
-    # Try to extract from code fence
-    match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
-    if match:
-        text = match.group(1)
+    # Look for /SPEC marker followed by json fence
+    pattern = r"/SPEC\s*\n\s*```json\s*\n(.*?)\n\s*```"
+    match = re.search(pattern, text, re.DOTALL)
     
-    # Try direct parse
+    if not match:
+        return None
+    
+    json_text = match.group(1)
+    
     try:
-        data = json.loads(text)
+        data = json.loads(json_text)
         return data
     except json.JSONDecodeError:
-        # Try to find JSON object in text
-        match = re.search(r"\{.*\}", text, re.DOTALL)
-        if match:
-            try:
-                return json.loads(match.group(0))
-            except json.JSONDecodeError:
-                pass
-    
-    return None
+        return None
 
 
 def validate_issue_spec(spec: dict[str, Any]) -> tuple[bool, str]:
@@ -359,44 +368,117 @@ def run_interview(
     sandbox: ToolSandbox,
     repo_root: str,
     initial_idea: str = "",
+    existing_messages: list[dict[str, Any]] | None = None,
+    session_id: str | None = None,
     input_fn: Callable[[str], str] = input,
     print_fn: Callable[[str], None] = print
-) -> dict[str, Any] | None:
+) -> tuple[dict[str, Any] | None, list[dict[str, Any]], str]:
     """
     Run the interactive interview loop.
-    Returns the validated spec or None if cancelled.
+    Returns (spec, messages, session_id).
+    
+    If existing_messages is provided, continues from that state.
+    If session_id is provided, reuses that ID for saving transcripts.
     """
-    prompt_template = load_prompt(repo_root)
-    context = get_repo_context(repo_root)
-    
-    system_message = prompt_template.replace("{{REPO_CONTEXT}}", context)
-    
-    messages = [{"role": "system", "content": system_message}]
-    
-    if initial_idea:
-        messages.append({"role": "user", "content": f"Idea inicial: {initial_idea}"})
+    if existing_messages:
+        messages = existing_messages
+        # Show the last assistant message to remind the user where we left off
+        for msg in reversed(messages):
+            if msg.get("role") == "assistant" and msg.get("content"):
+                print_fn(f"\n[Continuando desde sesión anterior]\n")
+                print_fn(f"{msg['content']}\n")
+                break
     else:
-        messages.append({"role": "user", "content": "Hola, necesito ayuda para especificar un nuevo issue."})
+        prompt_template = load_prompt(repo_root)
+        context = get_repo_context(repo_root)
+        
+        system_message = prompt_template.replace("{{REPO_CONTEXT}}", context)
+        
+        messages = [{"role": "system", "content": system_message}]
+        
+        if initial_idea:
+            messages.append({"role": "user", "content": f"Idea inicial: {initial_idea}"})
+        else:
+            messages.append({"role": "user", "content": "Hola, necesito ayuda para especificar un nuevo issue."})
+    
+    # Generate session ID if not provided
+    if session_id is None:
+        session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+    
+    # Print session path
+    sessions_dir = Path(repo_root) / ".backlog" / "sessions"
+    sessions_dir.mkdir(parents=True, exist_ok=True)
+    print_fn(f"Sesión: {sessions_dir / session_id}.json\n")
     
     # Interview loop
     max_turns = 30
+    max_consecutive_tool_calls = 8
+    consecutive_tool_calls = 0
+    spec_fix_attempts = 0
+    max_spec_fix_attempts = 2
+    
     for turn in range(max_turns):
-        # Call LLM
-        response = client.chat(messages, tools=sandbox.get_tool_definitions())
-        
-        if "error" in response:
-            print_fn(f"Error del LLM: {response['error']}")
-            return None
+        # Call LLM with retry logic
+        response = None
+        while response is None:
+            try:
+                response = client.chat(messages, tools=sandbox.get_tool_definitions())
+                
+                if "error" in response:
+                    print_fn(f"\nError del LLM: {response['error']}")
+                    print_fn("Presiona Enter para reintentar o escribe /cancelar para salir.")
+                    user_choice = input_fn("> ").strip().lower()
+                    if user_choice in ["/cancelar", "/cancel"]:
+                        return None, messages, session_id
+                    response = None  # Retry
+            except Exception as e:
+                print_fn(f"\nError de red: {e}")
+                print_fn("Presiona Enter para reintentar o escribe /cancelar para salir.")
+                try:
+                    user_choice = input_fn("> ").strip().lower()
+                    if user_choice in ["/cancelar", "/cancel"]:
+                        return None, messages, session_id
+                except (EOFError, KeyboardInterrupt):
+                    print_fn("\nEntrevista cancelada.")
+                    return None, messages, session_id
+                # Save messages before retry
+                save_transcript(repo_root, messages, session_id)
         
         messages.append(response)
         
         # Handle tool calls
         if response.get("tool_calls"):
+            consecutive_tool_calls += 1
+            
+            # Bounded tool-call loop
+            if consecutive_tool_calls > max_consecutive_tool_calls:
+                print_fn(f"\n[Límite de llamadas consecutivas a herramientas alcanzado. Solicitando al agente que continúe sin herramientas.]\n")
+                messages.append({
+                    "role": "user",
+                    "content": "Has usado muchas herramientas. Por favor continúa con la entrevista sin usar más herramientas por ahora."
+                })
+                consecutive_tool_calls = 0
+                # Save transcript
+                save_transcript(repo_root, messages, session_id)
+                continue
+            
             for tool_call in response["tool_calls"]:
                 func = tool_call["function"]
                 name = func["name"]
-                args = json.loads(func["arguments"])
                 
+                # Parse arguments with error handling
+                try:
+                    args = json.loads(func["arguments"])
+                except json.JSONDecodeError as e:
+                    result = f"Error: malformed JSON arguments: {e}"
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tool_call["id"],
+                        "content": result
+                    })
+                    continue
+                
+                # Execute tool (returns error string instead of raising)
                 result = sandbox.execute_tool(name, args)
                 
                 messages.append({
@@ -405,43 +487,61 @@ def run_interview(
                     "content": result
                 })
             
+            # Save transcript after tool calls
+            save_transcript(repo_root, messages, session_id)
             # Continue loop to let agent process tool results
             continue
+        
+        # Reset tool call counter when assistant produces text
+        consecutive_tool_calls = 0
         
         # Show agent response
         content = response.get("content", "")
         if content:
             print_fn(f"\n{content}\n")
         
-        # Check if agent is signaling completion
-        if "/SPEC:" in content or '"issues":' in content:
+        # Check if agent is signaling completion with /SPEC
+        if "/SPEC" in content:
             # Try to parse spec
             spec = parse_final_spec(content)
             if spec:
                 valid, error = validate_issue_spec(spec)
                 if valid:
-                    return spec
+                    # Save final transcript
+                    save_transcript(repo_root, messages, session_id)
+                    return spec, messages, session_id
                 else:
-                    print_fn(f"Especificación inválida: {error}")
-                    # Give agent one chance to fix
-                    messages.append({"role": "user", "content": f"La especificación tiene un error: {error}. Por favor corregila."})
-                    continue
+                    spec_fix_attempts += 1
+                    if spec_fix_attempts <= max_spec_fix_attempts:
+                        print_fn(f"Especificación inválida: {error}")
+                        print_fn(f"Solicitando corrección (intento {spec_fix_attempts}/{max_spec_fix_attempts})...\n")
+                        messages.append({"role": "user", "content": f"La especificación tiene un error: {error}. Por favor corregila."})
+                        save_transcript(repo_root, messages, session_id)
+                        continue
+                    else:
+                        print_fn(f"Especificación inválida después de {max_spec_fix_attempts} intentos: {error}")
+                        print_fn("Continúa la entrevista para ajustar.\n")
+                        spec_fix_attempts = 0
+            else:
+                print_fn("No se pudo parsear la especificación. Continúa la entrevista.\n")
         
         # Get user input
         try:
             user_input = input_fn("> ")
         except (EOFError, KeyboardInterrupt):
             print_fn("\nEntrevista cancelada.")
-            return None
+            save_transcript(repo_root, messages, session_id)
+            return None, messages, session_id
         
         user_input = user_input.strip()
         
         if user_input.lower() in ["/cancelar", "/cancel"]:
             print_fn("Entrevista cancelada.")
-            return None
+            save_transcript(repo_root, messages, session_id)
+            return None, messages, session_id
         
         if user_input.lower() == "/listo":
-            messages.append({"role": "user", "content": "/listo - por favor genera la especificación final en JSON."})
+            messages.append({"role": "user", "content": "/listo - por favor genera la especificación final en formato /SPEC con ```json."})
         elif user_input.lower() == "/borrador":
             messages.append({"role": "user", "content": "/borrador - mostra el borrador actual de lo que llevamos hasta ahora."})
         elif user_input:
@@ -449,20 +549,69 @@ def run_interview(
         else:
             # Empty input, skip
             continue
+        
+        # Save transcript after user turn
+        save_transcript(repo_root, messages, session_id)
     
     print_fn("Alcanzado límite de turnos.")
-    return None
+    save_transcript(repo_root, messages, session_id)
+    return None, messages, session_id
 
 
-def save_transcript(repo_root: str, messages: list[dict[str, Any]]) -> str:
-    """Save interview transcript to .backlog/sessions/."""
+def load_session(session_path: str) -> tuple[list[dict[str, Any]], str]:
+    """
+    Load a saved session from JSON file.
+    Returns (messages, session_id).
+    """
+    with open(session_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    
+    messages = data["messages"]
+    # Extract session_id from filename
+    session_id = Path(session_path).stem
+    
+    return messages, session_id
+
+
+def get_last_session(repo_root: str) -> str | None:
+    """
+    Get the path to the most recent session file.
+    Returns None if no sessions exist.
+    """
+    sessions_dir = Path(repo_root) / ".backlog" / "sessions"
+    if not sessions_dir.exists():
+        return None
+    
+    json_files = list(sessions_dir.glob("*.json"))
+    if not json_files:
+        return None
+    
+    # Sort by modification time, most recent first
+    json_files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+    return str(json_files[0])
+
+
+def save_transcript(repo_root: str, messages: list[dict[str, Any]], session_id: str | None = None) -> tuple[str, str]:
+    """
+    Save interview transcript to .backlog/sessions/.
+    Returns (json_path, md_path).
+    If session_id is provided, reuses that filename; otherwise creates new timestamped files.
+    """
     sessions_dir = Path(repo_root) / ".backlog" / "sessions"
     sessions_dir.mkdir(parents=True, exist_ok=True)
     
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filepath = sessions_dir / f"{timestamp}.md"
+    if session_id is None:
+        session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
     
-    with open(filepath, "w", encoding="utf-8") as f:
+    json_path = sessions_dir / f"{session_id}.json"
+    md_path = sessions_dir / f"{session_id}.md"
+    
+    # Save JSON (machine-readable, for resume)
+    with open(json_path, "w", encoding="utf-8") as f:
+        json.dump({"messages": messages, "timestamp": datetime.now().isoformat()}, f, indent=2)
+    
+    # Save markdown (human-readable)
+    with open(md_path, "w", encoding="utf-8") as f:
         f.write("# Interview Transcript\n\n")
         f.write(f"Date: {datetime.now().isoformat()}\n\n")
         
@@ -482,9 +631,10 @@ def save_transcript(repo_root: str, messages: list[dict[str, Any]]) -> str:
                 else:
                     f.write(f"**Assistant**: {content}\n\n")
             elif role == "tool":
-                f.write(f"**Tool result**: {content[:500]}...\n\n")
+                result_preview = content[:500] + "..." if len(content) > 500 else content
+                f.write(f"**Tool result**: {result_preview}\n\n")
     
-    return str(filepath)
+    return str(json_path), str(md_path)
 
 
 def edit_in_editor(initial_content: str) -> str | None:
@@ -522,6 +672,10 @@ def get_llm_config() -> tuple[str, str, str]:
         if keys_file.exists():
             with open(keys_file, "r") as f:
                 for line in f:
+                    line = line.strip()
+                    # Handle both "NOUS_API_KEY=..." and "export NOUS_API_KEY=..."
+                    if line.startswith("export "):
+                        line = line[7:].strip()
                     if line.startswith("NOUS_API_KEY="):
                         api_key = line.split("=", 1)[1].strip().strip('"\'')
                         break
