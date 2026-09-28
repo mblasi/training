@@ -14,7 +14,7 @@ _Nada por ahora._
 
 ### Fase 0 - Fundaciones
 
-- [ ] [#3](https://github.com/mblasi/training/issues/3) backlog new: agente entrevistador que especifica el issue antes de crearlo · feat
+- [ ] [#3](https://github.com/mblasi/training/issues/3) backlog new: agente entrevistador que especifica el issue antes de crearlo · feat · @mblasi
 
 ## ✅ Hecho
 
