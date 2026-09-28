@@ -484,5 +484,25 @@ class TestCreateIssueFromSpec(unittest.TestCase):
         self.assertTrue(hasattr(backlog, "create_issue_from_spec"))
 
 
+class TestScriptsSyntax(unittest.TestCase):
+    """Test that all scripts/*.py files are syntactically valid."""
+    
+    def test_all_scripts_compile(self):
+        """Test that all Python scripts in scripts/ directory compile without syntax errors."""
+        import py_compile
+        
+        scripts_dir = repo_root / "scripts"
+        script_files = list(scripts_dir.glob("*.py"))
+        
+        self.assertGreater(len(script_files), 0, "Should find at least one .py file in scripts/")
+        
+        for script_file in script_files:
+            with self.subTest(script=script_file.name):
+                try:
+                    py_compile.compile(str(script_file), doraise=True)
+                except py_compile.PyCompileError as e:
+                    self.fail(f"Syntax error in {script_file.name}: {e}")
+
+
 if __name__ == "__main__":
     unittest.main()

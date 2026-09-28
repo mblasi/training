@@ -17,5 +17,8 @@ jobs:
         with:
           python-version: '3.12'
       
+      - name: Check Python syntax
+        run: python3 -m py_compile scripts/*.py
+      
       - name: Run tests
         run: python3 -m unittest discover -s tests -v

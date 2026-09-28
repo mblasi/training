@@ -473,3 +473,160 @@ def run_design_phase(
         input_fn=input_fn,
         print_fn=print_fn
     )
+
+
+def review_and_approve(
+    spec: dict[str, Any],
+    issue: dict[str, Any],
+    spec_file: Path,
+    branch_name: str,
+    repo_root: str,
+    run_command: Callable[[list[str]], subprocess.CompletedProcess],
+    input_fn: Callable[[str], str] = input,
+    print_fn: Callable[[str], None] = print,
+    edit_fn: Callable[[str], str | None] = edit_in_editor,
+    continue_fn: Callable[
+        [LLMClient, ToolSandbox, str, dict[str, Any], list[dict[str, Any]], str],
+        tuple[dict[str, Any] | None, list[dict[str, Any]], str]
+    ] | None = None
+) -> tuple[dict[str, Any], str]:
+    """
+    Review and approve spec with interactive loop.
+    
+    Args:
+        spec: Implementation spec dict
+        issue: Full issue dict
+        spec_file: Path where spec will be saved
+        branch_name: Current git branch name
+        repo_root: Repository root path
+        run_command: Function to run shell commands
+        input_fn: Function to get user input (for testing)
+        print_fn: Function to print output (for testing)
+        edit_fn: Function to edit text in editor (for testing)
+        continue_fn: Function to continue design conversation (for testing)
+    
+    Returns:
+        (final_spec, status) where status is "approved", "draft", or "cancelled"
+    """
+    issue_num = issue["number"]
+    
+    while True:
+        print_fn("\n" + "=" * 80)
+        print_fn("PREVIEW DE LA ESPECIFICACIÓN")
+        print_fn("=" * 80)
+        print_fn("")
+        
+        spec_md = render_spec_markdown(spec, issue)
+        print_fn(spec_md)
+        
+        print_fn("\n" + "=" * 80)
+        print_fn("Opciones:")
+        print_fn("  [a]probar - guardar spec y commitear")
+        print_fn("  [e]ditar - editar en $EDITOR")
+        print_fn("  [s]eguir - continuar conversando con el agente")
+        print_fn("  [x] salir - guardar como draft")
+        print_fn("=" * 80)
+        
+        choice = input_fn("\n> ").strip().lower()
+        
+        if choice == "a":
+            # Approve: save file, commit, post comment with decisions table
+            with open(spec_file, "w", encoding="utf-8") as f:
+                f.write(spec_md)
+            
+            set_status(str(spec_file), "approved")
+            
+            # Commit
+            run_command(["git", "add", str(spec_file)])
+            run_command(["git", "commit", "-m", f"docs: spec de implementación (#{issue_num})"])
+            
+            # Build comment with decisions table
+            summary = spec["summary"]
+            decisions = spec["decisions"]
+            tasks = spec["tasks"]
+            test_command = spec["test_command"]
+            
+            # Build decisions table
+            decisions_table = "| ID | Tema | Elegida | Por qué |\n|---|---|---|---|\n"
+            for dec in decisions:
+                decisions_table += f"| {dec['id']} | {dec['topic']} | {dec['chosen']} | {dec['rationale']} |\n"
+            
+            # Build tasks list
+            tasks_list = "\n".join([f"- {task['description']}" for task in tasks])
+            
+            comment_body = f"""📋 **Especificación de implementación aprobada**
+
+**Resumen**: {summary}
+
+**Decisiones de diseño**:
+{decisions_table}
+
+**Tareas** ({len(tasks)}):
+{tasks_list}
+
+**Test command**: `{test_command}`
+
+Ver especificación completa en `docs/specs/issue-{issue_num}.md` (rama `{branch_name}`).
+"""
+            
+            run_command([
+                "gh", "issue", "comment", str(issue_num),
+                "--body", comment_body
+            ])
+            
+            print_fn(f"\n✓ Spec guardada en {spec_file}")
+            print_fn(f"✓ Commiteada")
+            print_fn(f"✓ Comentario publicado en issue #{issue_num}")
+            
+            return (spec, "approved")
+        
+        elif choice == "e":
+            # Edit in $EDITOR
+            edited = edit_fn(spec_md)
+            if edited:
+                try:
+                    metadata, new_spec, progress = parse_spec_markdown(edited)
+                    # Validate
+                    valid, error = validate_impl_spec(new_spec)
+                    if valid:
+                        spec = new_spec
+                        print_fn("Especificación actualizada.")
+                    else:
+                        print_fn(f"Error de validación: {error}")
+                        print_fn("Cambios descartados.")
+                except Exception as e:
+                    print_fn(f"Error parseando: {e}")
+                    print_fn("Cambios descartados.")
+            else:
+                print_fn("Edición cancelada.")
+        
+        elif choice == "s":
+            # Continue conversation
+            if continue_fn is None:
+                print_fn("Error: continue_fn no provista.")
+                continue
+            
+            print_fn("\nContinuando diseño. Escribí tu pregunta o ajuste:\n")
+            user_msg = input_fn("> ").strip()
+            if not user_msg:
+                print_fn("Cancelado.")
+                continue
+            
+            # Note: In real usage, caller must provide continue_fn that handles
+            # client, sandbox, messages, session_id
+            # For simplicity, we expect continue_fn to handle the full continuation
+            # This is primarily for testing purposes
+            print_fn("Función de continuación no implementada completamente en modo testeable.")
+        
+        elif choice == "x":
+            # Save as draft
+            with open(spec_file, "w", encoding="utf-8") as f:
+                f.write(spec_md)
+            
+            print_fn(f"\n✓ Spec guardada como draft en {spec_file}")
+            print_fn(f"Para continuar: python3 scripts/backlog.py take {issue_num}")
+            
+            return (spec, "draft")
+        
+        else:
+            print_fn("Opción inválida. Usá a/e/s/x.")

@@ -600,9 +600,9 @@ def cmd_take(args):
         # If spec is approved or implementing, skip design and go to implementation
         if spec_status in ["approved", "implementing"]:
             pass  # Will run implementation phase below
-        elif status != "draft":
+        elif spec_status != "draft":
             # Unknown status, abort
-            print(f"Estado desconocido: {status}")
+            print(f"Estado desconocido: {spec_status}")
             return
     
     # Run design phase (if spec not already approved/implementing)
@@ -642,116 +642,23 @@ def cmd_take(args):
             return
         
         # Preview and approval loop
-        while True:
-        print("\n" + "=" * 80)
-        print("PREVIEW DE LA ESPECIFICACIÓN")
-        print("=" * 80)
-        print()
+        spec, approval_status = take_agent.review_and_approve(
+            spec=spec,
+            issue=full_issue,
+            spec_file=spec_file,
+            branch_name=branch_name,
+            repo_root=repo_root,
+            run_command=run_command
+        )
         
-        spec_md = take_agent.render_spec_markdown(spec, full_issue)
-        print(spec_md)
-        
-        print("\n" + "=" * 80)
-        print("Opciones:")
-        print("  [a]probar - guardar spec y commitear")
-        print("  [e]ditar - editar en $EDITOR")
-        print("  [s]eguir - continuar conversando con el agente")
-        print("  [x] salir - guardar como draft")
-        print("=" * 80)
-        
-        choice = input("\n> ").strip().lower()
-        
-        if choice == "a":
-            # Approve
-            with open(spec_file, "w", encoding="utf-8") as f:
-                f.write(spec_md)
-            
-            take_agent.set_status(str(spec_file), "approved")
-            
-            # Commit
-            run_command(["git", "add", str(spec_file)])
-            run_command(["git", "commit", "-m", f"docs: spec de implementación (#{issue_num})"])
-            
-            # Post comment to issue
-            summary = spec["summary"]
-            decisions_count = len(spec["decisions"])
-            tasks_count = len(spec["tasks"])
-            comment_body = f"""📋 **Especificación de implementación aprobada**
-
-**Resumen**: {summary}
-
-**Decisiones de diseño**: {decisions_count}
-**Tareas**: {tasks_count}
-**Test command**: `{spec['test_command']}`
-
-Ver especificación completa en `docs/specs/issue-{issue_num}.md` (rama `{branch_name}`).
-"""
-            run_command([
-                "gh", "issue", "comment", str(issue_num),
-                "--body", comment_body
-            ])
-            
-            print(f"\n✓ Spec guardada en {spec_file}")
-            print(f"✓ Commiteada")
-            print(f"✓ Comentario publicado en issue #{issue_num}")
-            
-            # Set spec_status so we can proceed to implementation
+        if approval_status == "approved":
             spec_status = "approved"
-            break
-        
-        elif choice == "e":
-            # Edit
-            edited = agent_core.edit_in_editor(spec_md)
-            if edited:
-                try:
-                    metadata, new_spec, progress = take_agent.parse_spec_markdown(edited)
-                    # Validate
-                    valid, error = take_agent.validate_impl_spec(new_spec)
-                    if valid:
-                        spec = new_spec
-                        print("Especificación actualizada.")
-                    else:
-                        print(f"Error de validación: {error}")
-                        print("Cambios descartados.")
-                except Exception as e:
-                    print(f"Error parseando: {e}")
-                    print("Cambios descartados.")
-            else:
-                print("Edición cancelada.")
-        
-        elif choice == "s":
-            # Continue conversation
-            print("\nContinuando diseño. Escribí tu pregunta o ajuste:\n")
-            user_msg = input("> ").strip()
-            if not user_msg:
-                print("Cancelado.")
-                continue
-            
-            # Append user message and continue interview
-            messages.append({"role": "user", "content": user_msg})
-            
-            new_spec, messages, session_id = take_agent.run_design_phase(
-                client, sandbox, repo_root, full_issue,
-                existing_messages=messages,
-                session_id=session_id
-            )
-            
-            if new_spec:
-                spec = new_spec
-            else:
-                print("No se obtuvo nueva especificación.")
-        
-        elif choice == "x":
-            # Save as draft
-            with open(spec_file, "w", encoding="utf-8") as f:
-                f.write(spec_md)
-            
-            print(f"\n✓ Spec guardada como draft en {spec_file}")
-            print(f"Para continuar: python3 scripts/backlog.py take {issue_num}")
-            break
-        
+        elif approval_status == "draft":
+            # Saved as draft, exit
+            return
         else:
-            print("Opción inválida. Usá a/e/s/x.")
+            # Cancelled or error
+            return
     
     if getattr(args, 'plan_only', False):
         print("\n(--plan-only: fase de implementación omitida)")

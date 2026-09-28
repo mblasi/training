@@ -547,5 +547,200 @@ class TestBuildContext(unittest.TestCase):
             self.assertIn("Issue body", context)
 
 
+class TestReviewAndApprove(unittest.TestCase):
+    """Test review_and_approve function."""
+    
+    def _make_mock_spec(self):
+        """Create a valid spec for testing."""
+        return {
+            "summary": "Test implementation",
+            "decisions": [
+                {
+                    "id": "D1",
+                    "topic": "Architecture",
+                    "options": ["A", "B"],
+                    "chosen": "A",
+                    "rationale": "Better"
+                }
+            ],
+            "files": [
+                {
+                    "path": "scripts/test.py",
+                    "action": "create",
+                    "purpose": "Test"
+                }
+            ],
+            "test_command": "python3 -m unittest",
+            "tasks": [
+                {
+                    "id": "T1",
+                    "title": "Task 1",
+                    "description": "Do something",
+                    "tests": [
+                        {
+                            "file": "tests/test_foo.py",
+                            "name": "test_foo_works",
+                            "asserts": "assert foo() == 'bar'"
+                        }
+                    ],
+                    "impl_files": ["scripts/foo.py"]
+                }
+            ],
+            "risks": ["None"],
+            "out_of_scope": ["Other features"]
+        }
+    
+    def test_approve_writes_file_and_commits(self):
+        """Test that approving saves file with status approved, commits, and posts comment."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            spec_file = Path(tmpdir) / "test-spec.md"
+            spec = self._make_mock_spec()
+            issue = {
+                "number": 42,
+                "title": "Test Issue",
+                "body": "Test body",
+                "labels": [],
+                "comments": [],
+                "milestone": None
+            }
+            
+            commands_run = []
+            def mock_run_command(cmd):
+                commands_run.append(cmd)
+                return MagicMock()
+            
+            inputs = ["a"]  # Approve
+            def mock_input(prompt):
+                return inputs.pop(0)
+            
+            outputs = []
+            def mock_print(msg):
+                outputs.append(msg)
+            
+            final_spec, status = take_agent.review_and_approve(
+                spec=spec,
+                issue=issue,
+                spec_file=spec_file,
+                branch_name="issue/42-test",
+                repo_root=tmpdir,
+                run_command=mock_run_command,
+                input_fn=mock_input,
+                print_fn=mock_print
+            )
+            
+            # Check status
+            self.assertEqual(status, "approved")
+            
+            # Check file was written
+            self.assertTrue(spec_file.exists())
+            content = spec_file.read_text()
+            self.assertIn("status: approved", content)
+            self.assertIn("Test implementation", content)
+            
+            # Check git add and commit were called
+            self.assertEqual(len(commands_run), 3)
+            self.assertEqual(commands_run[0], ["git", "add", str(spec_file)])
+            self.assertEqual(commands_run[1], ["git", "commit", "-m", "docs: spec de implementación (#42)"])
+            
+            # Check gh comment was called with decisions table
+            self.assertEqual(commands_run[2][0:3], ["gh", "issue", "comment"])
+            self.assertEqual(commands_run[2][3], "42")
+            comment_body = commands_run[2][5]
+            self.assertIn("Especificación de implementación aprobada", comment_body)
+            self.assertIn("| ID | Tema | Elegida | Por qué |", comment_body)
+            self.assertIn("| D1 | Architecture | A | Better |", comment_body)
+            self.assertIn("- Do something", comment_body)
+            self.assertIn("python3 -m unittest", comment_body)
+    
+    def test_exit_saves_draft(self):
+        """Test that exiting saves spec as draft."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            spec_file = Path(tmpdir) / "test-spec.md"
+            spec = self._make_mock_spec()
+            issue = {
+                "number": 42,
+                "title": "Test Issue",
+                "body": "",
+                "labels": [],
+                "comments": [],
+                "milestone": None
+            }
+            
+            inputs = ["x"]  # Exit
+            def mock_input(prompt):
+                return inputs.pop(0)
+            
+            outputs = []
+            def mock_print(msg):
+                outputs.append(msg)
+            
+            final_spec, status = take_agent.review_and_approve(
+                spec=spec,
+                issue=issue,
+                spec_file=spec_file,
+                branch_name="issue/42-test",
+                repo_root=tmpdir,
+                run_command=lambda cmd: MagicMock(),
+                input_fn=mock_input,
+                print_fn=mock_print
+            )
+            
+            # Check status
+            self.assertEqual(status, "draft")
+            
+            # Check file was written
+            self.assertTrue(spec_file.exists())
+            content = spec_file.read_text()
+            # Status should be draft (default when parsing)
+            self.assertIn("Test implementation", content)
+    
+    def test_edit_with_invalid_spec_discards(self):
+        """Test that editing with invalid spec discards changes."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            spec_file = Path(tmpdir) / "test-spec.md"
+            spec = self._make_mock_spec()
+            issue = {
+                "number": 42,
+                "title": "Test",
+                "body": "",
+                "labels": [],
+                "comments": [],
+                "milestone": None
+            }
+            
+            invalid_edited = "---\nissue: 42\nstatus: draft\n---\n# Invalid spec without required fields"
+            
+            inputs = ["e", "x"]  # Edit, then exit
+            def mock_input(prompt):
+                return inputs.pop(0)
+            
+            outputs = []
+            def mock_print(msg):
+                outputs.append(msg)
+            
+            def mock_edit(text):
+                return invalid_edited
+            
+            final_spec, status = take_agent.review_and_approve(
+                spec=spec,
+                issue=issue,
+                spec_file=spec_file,
+                branch_name="issue/42-test",
+                repo_root=tmpdir,
+                run_command=lambda cmd: MagicMock(),
+                input_fn=mock_input,
+                print_fn=mock_print,
+                edit_fn=mock_edit
+            )
+            
+            # Check that error message was printed
+            error_msgs = [msg for msg in outputs if "Error" in msg or "descartados" in msg]
+            self.assertTrue(len(error_msgs) > 0, "Should have printed error/discard message")
+            
+            # Original spec should be unchanged
+            self.assertEqual(final_spec["summary"], "Test implementation")
+            self.assertEqual(status, "draft")
+
+
 if __name__ == "__main__":
     unittest.main()
