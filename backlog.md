@@ -4,11 +4,11 @@
 
 ## 🚧 En curso (WIP)
 
-- [ ] [#7](https://github.com/mblasi/training/issues/7) docs: registrar decisiones de producto en DESIGN.md · docs · @mblasi
+_Nada por ahora._
 
 ## 👀 En revisión
 
-_Nada por ahora._
+- [ ] [#7](https://github.com/mblasi/training/issues/7) docs: registrar decisiones de producto en DESIGN.md · docs · @mblasi
 
 ## 📋 Pendiente
 
