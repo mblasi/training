@@ -27,8 +27,11 @@ python3 scripts/backlog.py pr <N>
 # Mergear PR
 python3 scripts/backlog.py merge <N>
 
-# Crear nuevo issue
-python3 scripts/backlog.py new "Título" --type {feat|fix|chore|docs|infra}
+# Crear nuevo issue (modo interactivo con agente IA)
+python3 scripts/backlog.py new
+
+# Crear issue directo (sin entrevista)
+python3 scripts/backlog.py new "Título" --type feat --no-interview
 
 # Ver todos los comandos
 python3 scripts/backlog.py --help
