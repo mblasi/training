@@ -1,0 +1,644 @@
+#!/usr/bin/env python3
+"""
+Issue management harness for GitHub-backed backlog workflow.
+Requires: git, gh CLI authenticated.
+"""
+import argparse
+import json
+import os
+import re
+import subprocess
+import sys
+from datetime import datetime
+from typing import Any
+
+
+def run_command(cmd: list[str], cwd: str | None = None, check: bool = True) -> subprocess.CompletedProcess:
+    """Execute a command safely using argument list (never shell=True)."""
+    return subprocess.run(cmd, cwd=cwd, check=check, capture_output=True, text=True)
+
+
+def git_toplevel() -> str:
+    """Get the repository root directory."""
+    result = run_command(["git", "rev-parse", "--show-toplevel"])
+    return result.stdout.strip()
+
+
+def get_repo_slug() -> str:
+    """Get repository slug (owner/repo) from gh or env."""
+    if slug := os.environ.get("BACKLOG_REPO"):
+        return slug
+    result = run_command(["gh", "repo", "view", "--json", "nameWithOwner"])
+    data = json.loads(result.stdout)
+    return data["nameWithOwner"]
+
+
+def slugify(text: str) -> str:
+    """Convert text to URL-friendly slug."""
+    text = text.lower()
+    text = re.sub(r"[^a-z0-9]+", "-", text)
+    return text.strip("-")[:50]
+
+
+def parse_issue_number_from_branch(branch: str) -> int | None:
+    """Extract issue number from branch name like 'issue/123-foo-bar'."""
+    if match := re.match(r"^issue/(\d+)", branch):
+        return int(match.group(1))
+    return None
+
+
+def current_branch() -> str:
+    """Get current git branch name."""
+    result = run_command(["git", "branch", "--show-current"])
+    return result.stdout.strip()
+
+
+def is_working_tree_clean() -> bool:
+    """Check if git working tree is clean."""
+    result = run_command(["git", "status", "--porcelain"])
+    return result.stdout.strip() == ""
+
+
+def get_default_branch() -> str:
+    """Get default branch name (typically 'main')."""
+    result = run_command(["gh", "repo", "view", "--json", "defaultBranchRef", "-q", ".defaultBranchRef.name"])
+    return result.stdout.strip()
+
+
+def cmd_init(args):
+    """Initialize labels and milestones (idempotent)."""
+    labels = [
+        ("status:todo", "ededed", "Issue is queued"),
+        ("status:wip", "fbca04", "Work in progress"),
+        ("status:review", "0e8a16", "In review"),
+        ("blocked", "d73a4a", "Blocked by dependency"),
+        ("type:feat", "a2eeef", "New feature"),
+        ("type:fix", "d73a4a", "Bug fix"),
+        ("type:chore", "fef2c0", "Maintenance task"),
+        ("type:docs", "0075ca", "Documentation"),
+        ("type:infra", "5319e7", "Infrastructure"),
+        ("area:web", "c5def5", "Web frontend"),
+        ("area:api", "c5def5", "API backend"),
+        ("area:agents", "c5def5", "AI agents"),
+        ("area:admin", "c5def5", "Admin tools"),
+        ("area:infra", "c5def5", "Infrastructure"),
+    ]
+    
+    print("Creating labels...")
+    for name, color, description in labels:
+        result = run_command(
+            ["gh", "label", "create", name, "--color", color, "--description", description, "--force"],
+            check=False
+        )
+        if result.returncode == 0:
+            print(f"  ✓ {name}")
+    
+    milestones = [
+        ("Fase 0 - Fundaciones", "Infrastructure and core setup"),
+        ("Fase 1 - MVP individual", "Individual user MVP"),
+        ("Fase 2 - Retención y comunidad", "Retention and community features"),
+        ("Fase 3 - Calidad y escala", "Quality and scale improvements"),
+    ]
+    
+    print("\nCreating milestones...")
+    # Fetch existing milestones
+    result = run_command(["gh", "api", "/repos/{owner}/{repo}/milestones", "--paginate"], check=False)
+    existing = {m["title"] for m in json.loads(result.stdout)} if result.returncode == 0 else set()
+    
+    for title, description in milestones:
+        if title in existing:
+            print(f"  ~ {title} (already exists)")
+            continue
+        
+        payload = json.dumps({"title": title, "description": description})
+        result = run_command(
+            ["gh", "api", "/repos/{owner}/{repo}/milestones", "-X", "POST", "-f", f"title={title}", "-f", f"description={description}"],
+            check=False
+        )
+        if result.returncode == 0:
+            print(f"  ✓ {title}")
+        else:
+            print(f"  ✗ {title}: {result.stderr}", file=sys.stderr)
+    
+    print("\nInitialization complete.")
+
+
+def cmd_new(args):
+    """Create a new issue."""
+    title = args.title
+    type_label = f"type:{args.type}"
+    labels = [type_label, "status:todo"]
+    
+    if args.area:
+        labels.extend(f"area:{a}" for a in args.area)
+    
+    milestone_map = {
+        0: "Fase 0 - Fundaciones",
+        1: "Fase 1 - MVP individual",
+        2: "Fase 2 - Retención y comunidad",
+        3: "Fase 3 - Calidad y escala",
+    }
+    
+    body = args.body
+    if args.body_file:
+        with open(args.body_file, "r", encoding="utf-8") as f:
+            body = f.read()
+    elif not body:
+        body = "## Contexto\n\n(Describir el problema o necesidad)\n\n## Criterios de aceptación\n\n- [ ] \n"
+    
+    cmd = ["gh", "issue", "create", "--title", title, "--body", body]
+    for label in labels:
+        cmd.extend(["--label", label])
+    
+    if args.phase is not None:
+        milestone = milestone_map[args.phase]
+        cmd.extend(["--milestone", milestone])
+    
+    result = run_command(cmd)
+    # Parse issue number from URL
+    url = result.stdout.strip()
+    if match := re.search(r"/issues/(\d+)", url):
+        number = match.group(1)
+        print(f"Created issue #{number}: {url}")
+    else:
+        print(url)
+
+
+def cmd_list(args):
+    """List open issues."""
+    state = "all" if args.all else "open"
+    result = run_command([
+        "gh", "issue", "list",
+        "--state", state,
+        "--limit", "500",
+        "--json", "number,title,state,labels,milestone,assignees"
+    ])
+    
+    issues = json.loads(result.stdout)
+    
+    if not issues:
+        print("No issues found.")
+        return
+    
+    # Table header
+    print(f"{'#':<6} {'Status':<12} {'Type':<10} {'Milestone':<25} {'Title'}")
+    print("-" * 100)
+    
+    for issue in issues:
+        num = issue["number"]
+        labels = {l["name"] for l in issue["labels"]}
+        
+        status = next((l for l in labels if l.startswith("status:")), "")
+        status = status.replace("status:", "") if status else "-"
+        
+        type_label = next((l for l in labels if l.startswith("type:")), "")
+        type_label = type_label.replace("type:", "") if type_label else "-"
+        
+        milestone = issue["milestone"]["title"] if issue.get("milestone") else "-"
+        title = issue["title"][:50]
+        
+        print(f"#{num:<5} {status:<12} {type_label:<10} {milestone:<25} {title}")
+
+
+def cmd_take(args):
+    """Take an issue: create branch, assign, mark WIP."""
+    issue_num = args.issue
+    
+    if not is_working_tree_clean():
+        print("Error: Working tree is dirty. Commit or stash changes first.", file=sys.stderr)
+        sys.exit(1)
+    
+    # Fetch issue details
+    result = run_command([
+        "gh", "issue", "view", str(issue_num),
+        "--json", "number,title,state,labels,assignees"
+    ])
+    issue = json.loads(result.stdout)
+    
+    if issue["state"] == "CLOSED":
+        print(f"Error: Issue #{issue_num} is already closed.", file=sys.stderr)
+        sys.exit(1)
+    
+    labels = {l["name"] for l in issue["labels"]}
+    assignees = [a["login"] for a in issue["assignees"]]
+    
+    # Check if already WIP by someone else
+    result = run_command(["gh", "api", "user", "-q", ".login"])
+    current_user = result.stdout.strip()
+    
+    if "status:wip" in labels and assignees and current_user not in assignees:
+        print(f"Error: Issue #{issue_num} is already WIP by {assignees[0]}.", file=sys.stderr)
+        sys.exit(1)
+    
+    # Update to main
+    default_branch = get_default_branch()
+    run_command(["git", "fetch"])
+    run_command(["git", "checkout", default_branch])
+    run_command(["git", "pull", "--ff-only"])
+    
+    # Create or checkout branch
+    branch_name = f"issue/{issue_num}-{slugify(issue['title'])}"
+    result = run_command(["git", "show-ref", "--verify", f"refs/heads/{branch_name}"], check=False)
+    
+    if result.returncode == 0:
+        # Branch exists, just checkout
+        run_command(["git", "checkout", branch_name])
+        print(f"Checked out existing branch: {branch_name}")
+    else:
+        # Create new branch
+        run_command(["git", "checkout", "-b", branch_name])
+        run_command(["git", "push", "-u", "origin", branch_name])
+        print(f"Created branch: {branch_name}")
+    
+    # Assign to me
+    run_command(["gh", "issue", "edit", str(issue_num), "--add-assignee", "@me"])
+    
+    # Update labels: remove status:todo, add status:wip
+    if "status:todo" in labels:
+        run_command(["gh", "issue", "edit", str(issue_num), "--remove-label", "status:todo"])
+    if "status:wip" not in labels:
+        run_command(["gh", "issue", "edit", str(issue_num), "--add-label", "status:wip"])
+    
+    # Comment on issue
+    run_command([
+        "gh", "issue", "comment", str(issue_num),
+        "--body", f"🚧 Tomado. Rama: `{branch_name}`"
+    ])
+    
+    print(f"Issue #{issue_num} is now WIP on branch {branch_name}")
+
+
+def cmd_pr(args):
+    """Create PR for current issue branch."""
+    issue_num = args.issue
+    branch = current_branch()
+    default_branch = get_default_branch()
+    
+    if branch == default_branch:
+        print(f"Error: Cannot create PR from {default_branch} branch.", file=sys.stderr)
+        sys.exit(1)
+    
+    # Verify we have commits ahead of main
+    result = run_command(["git", "rev-list", f"{default_branch}..HEAD", "--count"])
+    ahead = int(result.stdout.strip())
+    
+    if ahead == 0:
+        print(f"Error: No commits ahead of {default_branch}.", file=sys.stderr)
+        sys.exit(1)
+    
+    # Push branch
+    run_command(["git", "push", "-u", "origin", branch])
+    
+    # Get issue details
+    result = run_command([
+        "gh", "issue", "view", str(issue_num),
+        "--json", "title"
+    ])
+    issue = json.loads(result.stdout)
+    pr_title = f"{issue['title']} (#{issue_num})"
+    
+    # Get commit summary
+    result = run_command(["git", "log", f"{default_branch}..HEAD", "--oneline"])
+    commit_summary = result.stdout.strip()
+    
+    pr_body = f"Closes #{issue_num}\n\n## Commits\n```\n{commit_summary}\n```"
+    
+    # Check if PR already exists
+    result = run_command([
+        "gh", "pr", "list",
+        "--head", branch,
+        "--json", "url"
+    ], check=False)
+    
+    if result.returncode == 0:
+        existing_prs = json.loads(result.stdout)
+        if existing_prs:
+            print(f"PR already exists: {existing_prs[0]['url']}")
+            return
+    
+    # Create PR
+    cmd = [
+        "gh", "pr", "create",
+        "--title", pr_title,
+        "--body", pr_body,
+        "--base", default_branch
+    ]
+    
+    if args.draft:
+        cmd.append("--draft")
+    
+    result = run_command(cmd)
+    pr_url = result.stdout.strip()
+    
+    # Update issue labels
+    run_command(["gh", "issue", "edit", str(issue_num), "--remove-label", "status:wip"])
+    run_command(["gh", "issue", "edit", str(issue_num), "--add-label", "status:review"])
+    
+    print(f"PR created: {pr_url}")
+
+
+def cmd_merge(args):
+    """Merge PR for an issue."""
+    issue_num = args.issue
+    default_branch = get_default_branch()
+    
+    # Find PR for issue
+    result = run_command([
+        "gh", "pr", "list",
+        "--search", f"#{issue_num} in:title",
+        "--json", "number,url,headRefName",
+        "--state", "open"
+    ])
+    prs = json.loads(result.stdout)
+    
+    if not prs:
+        print(f"Error: No open PR found for issue #{issue_num}.", file=sys.stderr)
+        sys.exit(1)
+    
+    pr = prs[0]
+    pr_number = pr["number"]
+    
+    # Check PR checks
+    result = run_command(["gh", "pr", "checks", str(pr_number)], check=False)
+    if "fail" in result.stdout.lower():
+        print(f"Warning: PR #{pr_number} has failing checks:", file=sys.stderr)
+        print(result.stdout, file=sys.stderr)
+        response = input("Continue anyway? [y/N] ")
+        if response.lower() != "y":
+            sys.exit(1)
+    
+    # Merge PR
+    run_command(["gh", "pr", "merge", str(pr_number), "--squash", "--delete-branch"])
+    
+    # Checkout and update main
+    run_command(["git", "checkout", default_branch])
+    run_command(["git", "pull", "--ff-only"])
+    
+    print(f"PR #{pr_number} merged successfully. Issue #{issue_num} closed.")
+
+
+def render_backlog(issues: list[dict[str, Any]]) -> str:
+    """Pure function to render backlog.md from issues list."""
+    lines = [
+        "# Backlog",
+        "",
+        "> Generado automáticamente desde GitHub Issues por `scripts/backlog.py render`. No editar a mano.",
+        "",
+    ]
+    
+    # Categorize issues
+    wip = []
+    review = []
+    todo_by_milestone = {}
+    done = []
+    
+    for issue in issues:
+        labels = {l["name"] for l in issue["labels"]}
+        is_blocked = "blocked" in labels
+        
+        status = None
+        for label in labels:
+            if label.startswith("status:"):
+                status = label.replace("status:", "")
+                break
+        
+        type_label = next((l.replace("type:", "") for l in labels if l.startswith("type:")), "")
+        assignees = issue.get("assignees", [])
+        assignee_str = f"@{assignees[0]['login']}" if assignees else ""
+        
+        milestone = issue.get("milestone")
+        milestone_title = milestone["title"] if milestone else "Sin fase"
+        
+        checkbox = "x" if issue["state"] == "CLOSED" else " "
+        blocked_marker = "⛔ " if is_blocked else ""
+        
+        item = f"- [{checkbox}] {blocked_marker}[#{issue['number']}]({issue['url']}) {issue['title']}"
+        if type_label:
+            item += f" · {type_label}"
+        if assignee_str:
+            item += f" · {assignee_str}"
+        
+        if issue["state"] == "CLOSED":
+            done.append((issue.get("closedAt", ""), item))
+        elif status == "wip":
+            wip.append(item)
+        elif status == "review":
+            review.append(item)
+        else:
+            if milestone_title not in todo_by_milestone:
+                todo_by_milestone[milestone_title] = []
+            todo_by_milestone[milestone_title].append(item)
+    
+    # WIP section
+    lines.append("## 🚧 En curso (WIP)")
+    lines.append("")
+    if wip:
+        lines.extend(wip)
+    else:
+        lines.append("_Nada por ahora._")
+    lines.append("")
+    
+    # Review section
+    lines.append("## 👀 En revisión")
+    lines.append("")
+    if review:
+        lines.extend(review)
+    else:
+        lines.append("_Nada por ahora._")
+    lines.append("")
+    
+    # Todo section
+    lines.append("## 📋 Pendiente")
+    lines.append("")
+    
+    # Order milestones
+    milestone_order = [
+        "Fase 0 - Fundaciones",
+        "Fase 1 - MVP individual",
+        "Fase 2 - Retención y comunidad",
+        "Fase 3 - Calidad y escala",
+        "Sin fase",
+    ]
+    
+    has_todo = False
+    for milestone_title in milestone_order:
+        if milestone_title in todo_by_milestone:
+            has_todo = True
+            lines.append(f"### {milestone_title}")
+            lines.append("")
+            lines.extend(todo_by_milestone[milestone_title])
+            lines.append("")
+    
+    if not has_todo:
+        lines.append("_Nada por ahora._")
+        lines.append("")
+    
+    # Done section (most recent first, max 50)
+    lines.append("## ✅ Hecho")
+    lines.append("")
+    if done:
+        done.sort(key=lambda x: x[0], reverse=True)
+        for _, item in done[:50]:
+            lines.append(item)
+    else:
+        lines.append("_Nada por ahora._")
+    lines.append("")
+    
+    return "\n".join(lines)
+
+
+def cmd_render(args):
+    """Render backlog.md from GitHub issues."""
+    result = run_command([
+        "gh", "issue", "list",
+        "--state", "all",
+        "--limit", "500",
+        "--json", "number,title,state,labels,milestone,assignees,closedAt,url"
+    ])
+    
+    issues = json.loads(result.stdout)
+    content = render_backlog(issues)
+    
+    repo_root = git_toplevel()
+    backlog_path = os.path.join(repo_root, "backlog.md")
+    
+    if args.check:
+        # Check if file would change
+        try:
+            with open(backlog_path, "r", encoding="utf-8") as f:
+                existing = f.read()
+            if existing != content:
+                print("backlog.md would change.", file=sys.stderr)
+                sys.exit(1)
+            else:
+                print("backlog.md is up to date.")
+        except FileNotFoundError:
+            print("backlog.md does not exist yet.", file=sys.stderr)
+            sys.exit(1)
+    else:
+        # Write file
+        with open(backlog_path, "w", encoding="utf-8") as f:
+            f.write(content)
+        print(f"Rendered backlog.md ({len(issues)} issues)")
+
+
+def cmd_sync(args):
+    """Sync backlog.md and commit if changed (on main only)."""
+    branch = current_branch()
+    default_branch = get_default_branch()
+    
+    if branch != default_branch:
+        print(f"Error: sync can only run on {default_branch} branch.", file=sys.stderr)
+        sys.exit(1)
+    
+    # Render
+    cmd_render(argparse.Namespace(check=False))
+    
+    # Check if changed
+    result = run_command(["git", "status", "--porcelain", "backlog.md"])
+    if not result.stdout.strip():
+        print("backlog.md is already up to date.")
+        return
+    
+    # Commit and push
+    run_command(["git", "add", "backlog.md"])
+    run_command(["git", "commit", "-m", "docs: sync backlog.md [skip ci]"])
+    run_command(["git", "push"])
+    print("backlog.md synchronized and pushed.")
+
+
+def cmd_status(args):
+    """Show current branch and linked issue status."""
+    branch = current_branch()
+    print(f"Branch: {branch}")
+    
+    issue_num = parse_issue_number_from_branch(branch)
+    if not issue_num:
+        print("No linked issue (not an issue branch)")
+        return
+    
+    print(f"Issue: #{issue_num}")
+    
+    result = run_command([
+        "gh", "issue", "view", str(issue_num),
+        "--json", "title,state,labels,url"
+    ], check=False)
+    
+    if result.returncode != 0:
+        print("(Issue not found)")
+        return
+    
+    issue = json.loads(result.stdout)
+    print(f"Title: {issue['title']}")
+    print(f"State: {issue['state']}")
+    
+    labels = [l["name"] for l in issue["labels"]]
+    if labels:
+        print(f"Labels: {', '.join(labels)}")
+    
+    print(f"URL: {issue['url']}")
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Issue management harness")
+    subparsers = parser.add_subparsers(dest="command", required=True)
+    
+    # init
+    subparsers.add_parser("init", help="Initialize labels and milestones")
+    
+    # new
+    new_parser = subparsers.add_parser("new", help="Create new issue")
+    new_parser.add_argument("title", help="Issue title")
+    new_parser.add_argument("--type", required=True, choices=["feat", "fix", "chore", "docs", "infra"])
+    new_parser.add_argument("--area", action="append", help="Area label(s)")
+    new_parser.add_argument("--phase", type=int, choices=[0, 1, 2, 3], help="Phase milestone")
+    new_parser.add_argument("--body", help="Issue body text")
+    new_parser.add_argument("--body-file", help="Read body from file")
+    
+    # list
+    list_parser = subparsers.add_parser("list", help="List issues")
+    list_parser.add_argument("--all", action="store_true", help="Include closed issues")
+    
+    # take
+    take_parser = subparsers.add_parser("take", help="Take an issue")
+    take_parser.add_argument("issue", type=int, help="Issue number")
+    
+    # pr
+    pr_parser = subparsers.add_parser("pr", help="Create PR for issue")
+    pr_parser.add_argument("issue", type=int, help="Issue number")
+    pr_parser.add_argument("--draft", action="store_true", help="Create as draft PR")
+    
+    # merge
+    merge_parser = subparsers.add_parser("merge", help="Merge PR for issue")
+    merge_parser.add_argument("issue", type=int, help="Issue number")
+    
+    # render
+    render_parser = subparsers.add_parser("render", help="Render backlog.md")
+    render_parser.add_argument("--check", action="store_true", help="Exit 1 if file would change")
+    
+    # sync
+    subparsers.add_parser("sync", help="Sync backlog.md and commit if changed")
+    
+    # status
+    subparsers.add_parser("status", help="Show current branch and issue status")
+    
+    args = parser.parse_args()
+    
+    # Dispatch to command handler
+    cmd_map = {
+        "init": cmd_init,
+        "new": cmd_new,
+        "list": cmd_list,
+        "take": cmd_take,
+        "pr": cmd_pr,
+        "merge": cmd_merge,
+        "render": cmd_render,
+        "sync": cmd_sync,
+        "status": cmd_status,
+    }
+    
+    cmd_map[args.command](args)
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,55 @@
+name: Sync Backlog
+
+on:
+  issues:
+    types: [opened, edited, closed, reopened, labeled, unlabeled, assigned, unassigned, milestoned, demilestoned]
+  pull_request:
+    types: [closed]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: read
+
+concurrency:
+  group: backlog-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main branch
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      
+      - name: Render backlog
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BACKLOG_REPO: ${{ github.repository }}
+        run: python3 scripts/backlog.py render
+      
+      - name: Commit and push if changed
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          
+          if ! git diff --quiet backlog.md; then
+            git add backlog.md
+            git commit -m "docs: sync backlog.md [skip ci]"
+            
+            # Try to push, retry once with rebase if failed
+            if ! git push; then
+              git pull --rebase
+              git push
+            fi
+          else
+            echo "No changes to backlog.md"
+          fi
