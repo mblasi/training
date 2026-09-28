@@ -12,7 +12,9 @@ _Nada por ahora._
 
 ## 📋 Pendiente
 
-_Nada por ahora._
+### Fase 0 - Fundaciones
+
+- [ ] [#7](https://github.com/mblasi/training/issues/7) docs: registrar decisiones de producto en DESIGN.md · docs
 
 ## ✅ Hecho
 
