@@ -1,7 +1,8 @@
-# Training AI — Documento de diseño
+# Trainia — Documento de diseño
 
-Estado: Borrador v0.1 · 2026-09-28 · Para revisión antes de implementar
+Estado: v0.2 · 2026-09-28 · Decisiones de producto tomadas (ver §15)
 Responsable: Matías (owner / admin)
+Dominio: https://trainia.blasi.ar · Idioma/mercado inicial: español rioplatense / Argentina
 
 ---
 
@@ -31,20 +32,22 @@ Principios:
 
 ---
 
-## 2. Decisiones estratégicas (propuestas por defecto)
+## 2. Decisiones técnicas
 
-| Tema | Propuesta | Alternativas descartadas / por qué |
+| Tema | Decisión | Alternativas descartadas / por qué |
 |---|---|---|
-| Cliente | PWA (React + Vite + TS), instalable, web push. Fase 3: Capacitor para stores | React Native/Flutter: 2x esfuerzo antes de validar producto |
+| App usuario | **Expo (React Native + TS)**, expo-router, un solo código para iOS, Android y web. Builds y envío a stores con EAS Build/Submit | PWA sola: no llega a las stores. Capacitor sobre React/Vite: viable, pero UI no nativa, y los builds de iOS requieren una Mac (EAS los hace en la nube desde Linux). Flutter: otro lenguaje, no comparte tipos TS |
+| Panel admin | Web separada (React + Vite + TS), solo para el rol admin | Meterlo en la app móvil: mezcla audiencias y tamaño de bundle |
 | Backend | Node 20 + TypeScript + Fastify, monolito modular | Microservicios: prematuro. Python/FastAPI: viable, pero TS comparte tipos/Zod con el front y con los schemas de tools del LLM |
 | DB | PostgreSQL + pgvector (Cloud SQL) | SQLite: no escala a multiusuario en Cloud Run. Firestore: malo para stats/joins |
 | ORM | Drizzle (migrations SQL explícitas) | Prisma: más pesado, peor con pgvector |
 | Auth | Firebase Auth / Identity Platform (Google + email/password) | Auth propio: riesgo y trabajo sin valor diferencial |
-| Hosting | Cloud Run (api + worker), frontend en Cloud Storage + CDN (o Firebase Hosting) | GCE VM: más barato pero sin autoescalado y ops manual |
+| Hosting | **Proyecto GCP nuevo y dedicado**. Cloud Run (api + worker). Admin y web en Firebase Hosting. Dominios: `trainia.blasi.ar` (landing + web app), `api.trainia.blasi.ar`, `admin.trainia.blasi.ar` | GCE VM: más barato pero sin autoescalado y ops manual |
 | Jobs | Cloud Scheduler + Cloud Tasks → endpoints del worker | Cron en proceso: no sobrevive a escalar a 0 |
-| Push | Web Push (FCM) + email (fallback) | — |
-| LLM | Capa `llm/` agnóstica (OpenAI-compatible). Default Nous Portal; opción Vertex AI (Gemini) | Atarse a un proveedor |
-| Modelos | Por rol: chico/rápido para router, extracción y resúmenes; grande para síntesis de plan | Un solo modelo grande: caro y lento |
+| Push | Expo Notifications (APNs + FCM) + email como respaldo | — |
+| LLM | Capa `llm/` multi-proveedor: **Nous Portal** (misma cuenta que Hermes) y **Gemini** (API de Gemini / Vertex AI). Proveedor, modelo y parámetros **por agente**, configurables en caliente desde el admin (tabla `llm_routes`), con fallback entre proveedores | Atarse a un proveedor |
+| Modelos | Por rol: chico/rápido para router, extracción y resúmenes; grande para síntesis de plan. Defaults cargados por seed, editables en el admin | Un solo modelo grande: caro y lento |
+| Pagos | **RevenueCat** unifica las suscripciones de App Store y Google Play (IAP) y las de web (Mercado Pago / Stripe). El backend recibe los webhooks y mantiene `subscriptions` | Integrar cada store a mano: mucho trabajo y casos borde (renovaciones, reembolsos, grace period) |
 | Secretos | Secret Manager | .env en imagen |
 | Obs. | Cloud Logging + tabla propia `llm_calls` (tokens, costo, latencia, versión de prompt) | Solo logs: no sirve para el panel admin |
 
@@ -53,7 +56,9 @@ Principios:
 ## 3. Arquitectura
 
 ```
- PWA (React)  ──HTTPS/SSE──►  api (Cloud Run)
+ App Expo (iOS/Android/web) ─HTTPS/SSE─►  api (Cloud Run)
+ Admin web (React) ──────────HTTPS─────►    │
+ RevenueCat / stores ──── webhooks ────►    │
                                ├─ auth (Firebase JWT)
                                ├─ domain/     perfiles, planes, rutinas, dietas, objetivos,
                                │              registros, grupos, retos, recordatorios
@@ -202,8 +207,23 @@ points_ledger(id, user_id, reason, points, ref, at)
 feed_events(id, group_id, user_id, type, payload, at)             -- solo lo que el usuario comparte
 agent_prompts(id, agent, version, content, status[draft|published|archived],
               author, notes, created_at)
+llm_providers(id, name[nous|gemini], base_url, secret_ref, enabled)   -- la key vive en Secret Manager
+llm_routes(agent, provider_id, model, params jsonb, fallback_provider_id?, fallback_model?,
+           updated_by, updated_at)                                   -- editable desde el admin
+plans_catalog(id, code, name, price, currency, period, features jsonb, store_product_ids jsonb)
+subscriptions(user_id, status[trial|active|grace|expired|canceled], plan_code, source
+              [app_store|play_store|web], trial_ends_at, current_period_end, rc_customer_id)
+professionals(id, user_id?, kind[entrenador|nutricionista|psicologo|deportologo], name,
+              credentials jsonb, license_verified, bio, specialties[], modality[presencial|online],
+              location geography?, area jsonb, pricing jsonb, status[pending|approved|suspended])
+venues(id, kind[gimnasio|box|club|estudio|pileta|pista], name, location geography,
+       address, amenities[], disciplines[], price_range, hours jsonb, source, verified,
+       partner bool)
+referrals(id, user_id, target_type[professional|venue], target_id, reason, suggested_by
+          [agent|user|search], message_id?, status[suggested|contacted|booked|dismissed], at)
+reviews(id, user_id, target_type, target_id, rating, comment, at)
 llm_calls(id, user_id, conversation_id, agent, model, prompt_version, tokens_in,
-          tokens_out, cost_usd, latency_ms, context_breakdown jsonb, error?)
+          tokens_out, cost_usd, latency_ms, context_breakdown jsonb, error?, provider)
 feedback(id, message_id, user_id, rating[-1|1], reason, comment)
 safety_flags(id, user_id, message_id, category, severity, status, reviewed_by)
 ```
@@ -261,61 +281,134 @@ safety_flags(id, user_id, message_id, category, severity, status, reviewed_by)
   versión de prompt, flags de seguridad.
 - Revisión: cola de conversaciones marcadas (flag, 👎, error) con el contexto exacto que
   vio el modelo.
-- Config: modelos por rol, presupuestos de tokens, límites de uso por usuario.
+- Config LLM: por agente (router, coach, nutri, psico, sintetizador, extractor, resumidor)
+  elegir proveedor (Nous Portal / Gemini), modelo, temperatura, max tokens y fallback. Se
+  aplica en caliente, sin deploy. Botón "probar" que hace una llamada real y muestra latencia
+  y costo. Comparativa de costo/calidad por proveedor en las estadísticas.
+- Config general: presupuestos de tokens por capa de contexto, límites de uso por usuario y por
+  plan, duración del trial.
+- Negocio: suscripciones (trials activos, conversión trial→pago, churn, MRR), catálogo de
+  planes; moderación del marketplace (alta/verificación de profesionales, gimnasios,
+  reseñas reportadas).
 
 Nota: la combinación llm_calls + feedback + actions aceptadas/rechazadas + evals es un
 dataset de preferencias natural para fine-tuning futuro (SFT/DPO) de modelos propios.
 
 ---
 
-## 11. Roadmap
+## 11. Monetización
 
-Fase 0 — Fundaciones (1 semana)
-- Monorepo (pnpm workspaces): `apps/web`, `apps/api`, `packages/shared` (tipos + Zod)
-- Postgres local en Docker, Drizzle, migraciones, Firebase Auth, CI (lint + test)
-- Capa `llm/` + tabla `llm_calls`
+- Modelo: **free trial + suscripción**.
+- Trial: acceso completo por un período (propuesta: 14 días, configurable en el admin), sin
+  tarjeta si la store lo permite.
+- Suscripción mensual y anual (la anual con descuento). Los precios se definen en ARS para web
+  y por tier en las stores.
+- Canales: in-app purchase en iOS/Android (obligatorio por políticas de las stores para
+  contenido digital) y web (Mercado Pago o Stripe). RevenueCat unifica el estado; el backend
+  es la fuente de verdad de los permisos (`entitlements`) vía webhooks.
+- Al vencer: modo de solo lectura (ve su historial y su plan) más un límite chico de mensajes
+  al agente. No se borran datos.
+- Futuro: comisión o suscripción de profesionales y gimnasios en el marketplace (§12).
 
-Fase 1 — MVP individual (3–4 semanas)
-- Registro, onboarding conversacional (la ficha se completa conversando + formulario de respaldo)
+---
+
+## 12. Marketplace: profesionales y gimnasios
+
+Objetivo: complementar a los agentes IA con humanos, y convertir la app en puerta de entrada
+al ecosistema deportivo local.
+
+- Sugerencias contextuales: los agentes pueden sugerir un profesional o un lugar cuando
+  aporta valor. Ejemplos: el deportólogo IA detecta un dolor persistente → sugiere un
+  kinesiólogo o deportólogo cercano; el objetivo es natación → piletas cerca; las señales
+  emocionales son fuertes → psicólogo deportivo humano. Es una tool del Action Engine
+  (`suggest_professional`, `suggest_venue`) y la respuesta muestra tarjetas.
+  Las derivaciones por seguridad (§9) siempre priorizan profesionales de salud.
+- Directorio y búsqueda: por tipo, especialidad, modalidad (presencial u online), zona y
+  precio. Mapa de gimnasios, boxes, clubes y piletas.
+- Profesionales: alta con verificación de matrícula (moderación manual en el admin), perfil,
+  especialidades, modalidad y precios. Fase posterior: el usuario comparte su plan o su
+  progreso con el profesional (con consentimiento explícito), y hay un panel del profesional
+  para seguir a sus clientes.
+- Gimnasios: carga inicial curada (Places API u OSM + curación manual) y luego alta por el
+  propio gimnasio. Opción "partner" destacado.
+- Reputación: reseñas de usuarios verificados (que tuvieron un referral).
+- Transparencia: las sugerencias pagas o destacadas se marcan como tales. El ranking de
+  sugerencias del agente se basa en relevancia, no en pago.
+- Métricas en el admin: sugerencias → contactos → reservas, por tipo y zona.
+
+---
+
+## 13. Roadmap
+
+Fase 0 — Fundaciones (1–2 semanas)
+- Monorepo (pnpm workspaces): `apps/mobile` (Expo), `apps/admin` (React/Vite), `apps/api`
+  (Fastify), `packages/shared` (tipos + Zod)
+- Postgres + pgvector local en Docker, Drizzle, migraciones, CI (lint + typecheck + test)
+- Firebase Auth (Google + email/password) en la api y en las apps
+- Capa `llm/` multi-proveedor (Nous + Gemini) + `llm_routes` + tabla `llm_calls`
+- Proyecto GCP dedicado (IaC), Cloud Run + Cloud SQL staging, dominios `*.trainia.blasi.ar`
+- Cuentas de desarrollador de Apple y Google Play, EAS configurado (build interno)
+
+Fase 1 — MVP individual en las stores (4–6 semanas)
+- Registro, onboarding conversacional con PAR-Q+ (la ficha se completa conversando, con
+  formulario de respaldo)
 - Router + 3 especialistas + sintetizador, streaming
 - Context builder v1 (perfil, estado, últimos turnos, resumen rodante)
 - Action Engine: log_workout, log_meal, log_metric, set_goal, propose_plan_change
 - Plan inicial por consejo + vista "Hoy" + vista "Evolución" (gráficos)
-- Admin v1: prompts versionados + costo/uso básico
-- Deploy en Cloud Run + Cloud SQL (staging)
+- Admin v1: prompts versionados, configuración LLM por agente y costo/uso básico
+- Push (recordatorios básicos)
+- Free trial + suscripción (RevenueCat + IAP)
+- Deploy prod + publicación en Play Store y App Store (fichas, políticas de privacidad y
+  salud, revisión de Apple)
 
 Fase 2 — Retención y comunidad (3 semanas)
-- Recordatorios (Scheduler/Tasks + web push), check-in semanal proactivo
+- Recordatorios avanzados (Scheduler/Tasks + push), check-in semanal proactivo
 - Memoria episódica con pgvector
 - Grupos, privacidad, feed, rachas, puntos, retos, logros
+- Marketplace v1: directorio de gimnasios y profesionales + sugerencias de los agentes
 - Admin v2: retención, adherencia, feedback, cola de revisión, flags
 
 Fase 3 — Calidad y escala
 - Evals automatizados en admin, A/B de prompts
-- Integraciones: Health Connect / Apple Health / Strava / Garmin
+- Marketplace v2: panel del profesional, compartir el plan con el profesional, partners
+- Wearables (sin fecha; el modelo de `metrics` y el Action Engine ya los contemplan):
+  Health Connect / Apple HealthKit / Strava / Garmin
 - Fotos de comidas (visión) para estimar macros
-- Capacitor → Play Store / App Store
-- Monetización (freemium: límite de mensajes / planes avanzados)
 
 ---
 
-## 12. Costos estimados GCP (orden de magnitud, staging + prod chico)
+## 14. Costos estimados (orden de magnitud, staging + prod chico)
 
 - Cloud SQL db-f1-micro / db-g1-small: ~USD 10–30/mes (es el piso fijo principal)
 - Cloud Run api + worker con min-instances=0: ~USD 0–10/mes con poco tráfico
 - Firebase Auth, Scheduler, Tasks, Storage: ~gratis a esta escala
 - LLM: el costo variable real. Con router chico y 0–1 especialistas por turno, estimar
   ~USD 0.2–1 por usuario activo/mes; medir desde el día 1 con `llm_calls`.
+- Apple Developer Program: USD 99/año · Google Play Console: USD 25 (pago único)
+- EAS (Expo): plan gratuito para empezar; plan pago si se necesitan más builds
+- RevenueCat: gratis hasta USD 2.5k/mes de ingresos; después un % chico
+- Las stores retienen 15% (programa de pequeños desarrolladores) a 30% de la suscripción
 
 ---
 
-## 13. Preguntas abiertas
+## 15. Decisiones de producto (2026-09-28)
 
-1. Nombre del producto / dominio (¿subdominio de blasi.ar?)
-2. Idioma y mercado inicial: ¿español rioplatense / Argentina primero?
-3. Proveedor LLM de producción: Nous Portal vs Vertex AI (Gemini, factura en el mismo GCP)
-4. ¿PWA alcanza para el MVP o necesitás estar en stores desde el inicio?
-5. Monetización: ¿gratis al principio, freemium, suscripción?
-6. ¿Integraciones con wearables en el MVP o fase 3?
-7. Remote en GitHub para /home/matias/workspace/training (¿github.com/mblasi/training?) y flujo de trabajo (issues + OpenCode)
-8. ¿Profesionales humanos en el loop a futuro (marketplace de nutris/entrenadores reales)?
+| # | Tema | Decisión |
+|---|---|---|
+| 1 | Nombre / dominio | **Trainia** · trainia.blasi.ar |
+| 2 | Idioma / mercado | Español rioplatense / Argentina |
+| 3 | Proveedor LLM | Nous Portal (misma cuenta que Hermes) + Gemini, configurable por agente desde el admin |
+| 4 | Plataforma | Llegar a las stores (Expo + EAS); también web |
+| 5 | Monetización | Free trial + suscripción (§11) |
+| 6 | Wearables | No por ahora; no se descartan (Fase 3) |
+| 7 | Repo y flujo | github.com/mblasi/training · harness `scripts/backlog.py` (entrevista → spec → TDD) |
+| 8 | Profesionales humanos | Sí: marketplace + sugerencias de gimnasios y profesionales (§12) |
+| 9 | GCP | Proyecto nuevo y dedicado |
+
+### Preguntas abiertas
+- Duración del trial y precios (propuesta: 14 días; se define antes de la Fase 1)
+- Titular de las cuentas de desarrollador de las stores (persona física o empresa); afecta la
+  facturación y lo que se muestra en la ficha
+- Proveedor de pagos web: Mercado Pago vs Stripe
+- Fuente inicial de gimnasios: Google Places API (costo, términos) vs OSM + curación manual
