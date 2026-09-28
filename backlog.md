@@ -4,7 +4,7 @@
 
 ## 🚧 En curso (WIP)
 
-- [ ] [#1](https://github.com/mblasi/training/issues/1) Harness de gestión de issues: backlog.py + backlog.md sincronizado · chore · @mblasi
+_Nada por ahora._
 
 ## 👀 En revisión
 
@@ -16,4 +16,4 @@ _Nada por ahora._
 
 ## ✅ Hecho
 
-_Nada por ahora._
+- [x] [#1](https://github.com/mblasi/training/issues/1) Harness de gestión de issues: backlog.py + backlog.md sincronizado · chore · @mblasi
