@@ -88,13 +88,33 @@ python3 scripts/backlog.py list --all  # todos
 
 ### Crear nuevo issue
 
+**Modo interactivo** (recomendado, con entrevista guiada por IA):
+
+```bash
+python3 scripts/backlog.py new ["idea inicial opcional"]
+```
+
+El comando arranca una sesión interactiva con un agente Analista que te entrevista para crear una especificación completa. El agente:
+- Hace preguntas priorizadas en tandas cortas
+- Lee el contexto del repo y issues relacionados
+- Propone opciones con defaults recomendados
+- Detecta si el issue debe partirse en varios
+- Genera una especificación estructurada y completa
+
+Comandos durante la entrevista: `/listo` (finalizar), `/borrador` (ver estado actual), `/cancelar`.
+
+Requisitos: `NOUS_API_KEY` en el environment o en `~/.config/model-keys.env`.
+
+**Modo no interactivo** (para scripts o cuando ya tenés la spec):
+
 ```bash
 python3 scripts/backlog.py new "Título del issue" \
   --type {feat|fix|chore|docs|infra} \
   [--area web|api|agents|admin|infra] \
   [--phase {0|1|2|3}] \
   [--body "Descripción"] \
-  [--body-file path/to/description.md]
+  [--body-file path/to/description.md] \
+  [--no-interview]
 ```
 
 ### Inicializar labels y milestones (idempotente)

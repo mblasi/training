@@ -6,6 +6,7 @@ import importlib.util
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import MagicMock
 
 
 # Import backlog.py module
@@ -15,6 +16,10 @@ spec = importlib.util.spec_from_file_location("backlog", backlog_path)
 backlog = importlib.util.module_from_spec(spec)
 sys.modules["backlog"] = backlog
 spec.loader.exec_module(backlog)
+
+# Import issue_agent module
+sys.path.insert(0, str(repo_root / "scripts"))
+import issue_agent
 
 
 class TestSlugify(unittest.TestCase):
@@ -303,6 +308,175 @@ class TestRenderBacklog(unittest.TestCase):
         self.assertIn("In review", result)
         self.assertIn("⛔ [#3]", result)
         self.assertIn("- [x] [#4]", result)
+
+
+class TestIssueAgent(unittest.TestCase):
+    """Test issue_agent module functionality."""
+    
+    def test_parse_final_spec_json(self):
+        """Test JSON parsing from agent response."""
+        json_text = '{"issues": [{"title": "Test", "type": "feat", "body": "Body"}]}'
+        result = issue_agent.parse_final_spec(json_text)
+        self.assertIsNotNone(result)
+        self.assertEqual(len(result["issues"]), 1)
+        self.assertEqual(result["issues"][0]["title"], "Test")
+    
+    def test_parse_final_spec_with_fence(self):
+        """Test JSON parsing from markdown code fence."""
+        text = '''Here is the spec:
+```json
+{"issues": [{"title": "Test", "type": "feat", "body": "Body"}]}
+```
+'''
+        result = issue_agent.parse_final_spec(text)
+        self.assertIsNotNone(result)
+        self.assertEqual(len(result["issues"]), 1)
+    
+    def test_validate_issue_spec_valid(self):
+        """Test validation of valid spec."""
+        spec = {
+            "issues": [
+                {
+                    "title": "Test issue",
+                    "type": "feat",
+                    "body": "## Context\n\nTest body",
+                    "areas": ["web"],
+                    "phase": 1
+                }
+            ]
+        }
+        valid, error = issue_agent.validate_issue_spec(spec)
+        self.assertTrue(valid, f"Validation failed: {error}")
+    
+    def test_validate_issue_spec_missing_title(self):
+        """Test validation fails for missing title."""
+        spec = {"issues": [{"type": "feat", "body": "Body"}]}
+        valid, error = issue_agent.validate_issue_spec(spec)
+        self.assertFalse(valid)
+        self.assertIn("title", error.lower())
+    
+    def test_validate_issue_spec_invalid_type(self):
+        """Test validation fails for invalid type."""
+        spec = {"issues": [{"title": "Test", "type": "invalid", "body": "Body"}]}
+        valid, error = issue_agent.validate_issue_spec(spec)
+        self.assertFalse(valid)
+        self.assertIn("type", error.lower())
+    
+    def test_validate_issue_spec_invalid_area(self):
+        """Test validation fails for invalid area."""
+        spec = {"issues": [{"title": "Test", "type": "feat", "body": "Body", "areas": ["invalid"]}]}
+        valid, error = issue_agent.validate_issue_spec(spec)
+        self.assertFalse(valid)
+        self.assertIn("area", error.lower())
+    
+    def test_validate_issue_spec_invalid_phase(self):
+        """Test validation fails for invalid phase."""
+        spec = {"issues": [{"title": "Test", "type": "feat", "body": "Body", "phase": 5}]}
+        valid, error = issue_agent.validate_issue_spec(spec)
+        self.assertFalse(valid)
+        self.assertIn("phase", error.lower())
+    
+    def test_tool_sandbox_path_validation(self):
+        """Test that ToolSandbox rejects paths outside repo."""
+        sandbox = issue_agent.ToolSandbox(str(repo_root))
+        
+        # Valid path
+        try:
+            sandbox._validate_path("README.md")
+        except ValueError:
+            self.fail("Valid path rejected")
+        
+        # Invalid path (outside repo)
+        with self.assertRaises(ValueError):
+            sandbox._validate_path("../../etc/passwd")
+        
+        with self.assertRaises(ValueError):
+            sandbox._validate_path("/etc/passwd")
+    
+    def test_tool_sandbox_read_file(self):
+        """Test reading a file through sandbox."""
+        sandbox = issue_agent.ToolSandbox(str(repo_root))
+        content = sandbox.read_file("README.md")
+        self.assertIn("training", content)
+        self.assertNotIn("Error", content)
+    
+    def test_tool_sandbox_read_nonexistent(self):
+        """Test reading nonexistent file returns error."""
+        sandbox = issue_agent.ToolSandbox(str(repo_root))
+        content = sandbox.read_file("nonexistent.txt")
+        self.assertIn("Error", content)
+    
+    def test_llm_client_mock(self):
+        """Test LLMClient with mock (no real network call)."""
+        # Create a mock client
+        client = issue_agent.LLMClient("http://fake.url", "fake-key", "fake-model")
+        
+        # We don't test actual network calls in unit tests
+        # Just verify instantiation works
+        self.assertEqual(client.model, "fake-model")
+        self.assertEqual(client.api_key, "fake-key")
+    
+    def test_run_interview_mock(self):
+        """Test interview loop with mocked LLM client."""
+        # Create mock client that returns a valid spec
+        mock_client = MagicMock()
+        mock_client.chat.return_value = {
+            "role": "assistant",
+            "content": '''Perfecto, aquí está la especificación:
+
+```json
+{
+  "issues": [
+    {
+      "title": "Test issue from interview",
+      "type": "feat",
+      "body": "## Contexto\\n\\nTest context",
+      "areas": ["web"],
+      "phase": 1
+    }
+  ]
+}
+```
+'''
+        }
+        
+        # Mock input to send /listo immediately
+        inputs = ["/listo"]
+        input_idx = [0]
+        
+        def mock_input(prompt):
+            idx = input_idx[0]
+            input_idx[0] += 1
+            if idx < len(inputs):
+                return inputs[idx]
+            raise EOFError
+        
+        outputs = []
+        def mock_print(text):
+            outputs.append(text)
+        
+        sandbox = issue_agent.ToolSandbox(str(repo_root))
+        
+        spec = issue_agent.run_interview(
+            mock_client,
+            sandbox,
+            str(repo_root),
+            "Test idea",
+            input_fn=mock_input,
+            print_fn=mock_print
+        )
+        
+        self.assertIsNotNone(spec)
+        self.assertEqual(len(spec["issues"]), 1)
+        self.assertEqual(spec["issues"][0]["title"], "Test issue from interview")
+
+
+class TestCreateIssueFromSpec(unittest.TestCase):
+    """Test the new create_issue_from_spec function."""
+    
+    def test_function_exists(self):
+        """Test that create_issue_from_spec function exists."""
+        self.assertTrue(hasattr(backlog, "create_issue_from_spec"))
 
 
 if __name__ == "__main__":

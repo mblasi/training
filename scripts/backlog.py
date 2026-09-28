@@ -9,7 +9,9 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 
@@ -123,14 +125,15 @@ def cmd_init(args):
     print("\nInitialization complete.")
 
 
-def cmd_new(args):
-    """Create a new issue."""
-    title = args.title
-    type_label = f"type:{args.type}"
-    labels = [type_label, "status:todo"]
+def create_issue_from_spec(title: str, type_label: str, areas: list[str] | None, phase: int | None, body: str) -> int:
+    """
+    Create a single issue with given parameters.
+    Returns the issue number.
+    """
+    labels = [f"type:{type_label}", "status:todo"]
     
-    if args.area:
-        labels.extend(f"area:{a}" for a in args.area)
+    if areas:
+        labels.extend(f"area:{a}" for a in areas)
     
     milestone_map = {
         0: "Fase 0 - Fundaciones",
@@ -139,29 +142,151 @@ def cmd_new(args):
         3: "Fase 3 - Calidad y escala",
     }
     
-    body = args.body
-    if args.body_file:
-        with open(args.body_file, "r", encoding="utf-8") as f:
-            body = f.read()
-    elif not body:
-        body = "## Contexto\n\n(Describir el problema o necesidad)\n\n## Criterios de aceptación\n\n- [ ] \n"
-    
     cmd = ["gh", "issue", "create", "--title", title, "--body", body]
     for label in labels:
         cmd.extend(["--label", label])
     
-    if args.phase is not None:
-        milestone = milestone_map[args.phase]
+    if phase is not None:
+        milestone = milestone_map[phase]
         cmd.extend(["--milestone", milestone])
     
     result = run_command(cmd)
-    # Parse issue number from URL
     url = result.stdout.strip()
+    
     if match := re.search(r"/issues/(\d+)", url):
-        number = match.group(1)
-        print(f"Created issue #{number}: {url}")
+        return int(match.group(1))
     else:
-        print(url)
+        raise ValueError(f"Could not parse issue number from: {url}")
+
+
+def cmd_new(args):
+    """Create a new issue (interactive or direct)."""
+    # Non-interactive mode: direct creation
+    if args.no_interview or (args.type and (args.body or args.body_file)):
+        if not args.title:
+            print("Error: title required for non-interactive mode", file=sys.stderr)
+            sys.exit(1)
+        
+        title = args.title
+        type_label = args.type
+        
+        body = args.body
+        if args.body_file:
+            with open(args.body_file, "r", encoding="utf-8") as f:
+                body = f.read()
+        elif not body:
+            body = "## Contexto\n\n(Describir el problema o necesidad)\n\n## Criterios de aceptación\n\n- [ ] \n"
+        
+        number = create_issue_from_spec(title, type_label, args.area, args.phase, body)
+        print(f"Created issue #{number}")
+        return
+    
+    # Interactive mode: run interview
+    try:
+        import issue_agent
+    except ImportError:
+        # Add scripts dir to path
+        scripts_dir = Path(__file__).parent
+        sys.path.insert(0, str(scripts_dir))
+        import issue_agent
+    
+    repo_root = git_toplevel()
+    
+    # Get LLM config
+    try:
+        base_url, api_key, model = issue_agent.get_llm_config()
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+    
+    client = issue_agent.LLMClient(base_url, api_key, model)
+    sandbox = issue_agent.ToolSandbox(repo_root)
+    
+    print("Iniciando entrevista interactiva para crear issue(s)...")
+    print("Comandos disponibles: /listo, /borrador, /cancelar")
+    print()
+    
+    initial_idea = args.title if args.title else ""
+    spec = issue_agent.run_interview(client, sandbox, repo_root, initial_idea)
+    
+    if not spec:
+        print("Entrevista cancelada o sin resultado.")
+        sys.exit(1)
+    
+    # Show preview and options
+    issues = spec["issues"]
+    
+    print("\n" + "=" * 80)
+    print("PREVIEW DE ISSUE(S):")
+    print("=" * 80)
+    
+    for i, issue_spec in enumerate(issues, 1):
+        print(f"\n--- Issue {i}/{len(issues)} ---")
+        print(f"Título: {issue_spec['title']}")
+        print(f"Tipo: {issue_spec['type']}")
+        print(f"Áreas: {', '.join(issue_spec.get('areas', []) or []) or 'ninguna'}")
+        print(f"Fase: {issue_spec.get('phase', 'ninguna')}")
+        print(f"\nCuerpo:\n{issue_spec['body'][:500]}...")
+    
+    print("\n" + "=" * 80)
+    print("Opciones:")
+    print("  [c] Crear issue(s)")
+    print("  [e] Editar en $EDITOR")
+    print("  [s] Seguir entrevistando")
+    print("  [x] Cancelar")
+    
+    while True:
+        choice = input("\n> ").strip().lower()
+        
+        if choice == "c":
+            # Create issues
+            created = []
+            for issue_spec in issues:
+                number = create_issue_from_spec(
+                    issue_spec["title"],
+                    issue_spec["type"],
+                    issue_spec.get("areas"),
+                    issue_spec.get("phase"),
+                    issue_spec["body"]
+                )
+                created.append(number)
+                print(f"Created issue #{number}: {issue_spec['title']}")
+            
+            # Add cross-references if multiple issues
+            if len(created) > 1:
+                refs = ", ".join(f"#{n}" for n in created)
+                for number in created:
+                    result = run_command(["gh", "issue", "view", str(number), "--json", "body"])
+                    issue_data = json.loads(result.stdout)
+                    updated_body = issue_data["body"] + f"\n\n**Relacionado**: {refs}\n"
+                    run_command(["gh", "issue", "edit", str(number), "--body", updated_body])
+                print(f"\nAdded cross-references to all {len(created)} issues.")
+            
+            break
+        
+        elif choice == "e":
+            # Edit in $EDITOR
+            if len(issues) > 1:
+                print("Edición de múltiples issues no soportada. Usá [s] para ajustar en la entrevista.")
+                continue
+            
+            edited = issue_agent.edit_in_editor(issues[0]["body"])
+            if edited:
+                issues[0]["body"] = edited
+                print("Body actualizado. Mostrando preview...")
+                print(f"\n{edited[:500]}...")
+            else:
+                print("Edición cancelada.")
+        
+        elif choice == "s":
+            print("Seguir entrevistando no implementado aún. Usá [e] para editar o [c] para crear.")
+        
+        elif choice == "x":
+            print("Cancelado.")
+            sys.exit(0)
+        
+        else:
+            print("Opción inválida. Usá c/e/s/x.")
 
 
 def cmd_list(args):
@@ -588,12 +713,14 @@ def main():
     
     # new
     new_parser = subparsers.add_parser("new", help="Create new issue")
-    new_parser.add_argument("title", help="Issue title")
-    new_parser.add_argument("--type", required=True, choices=["feat", "fix", "chore", "docs", "infra"])
+    new_parser.add_argument("title", nargs="?", help="Issue title or initial idea (optional for interactive mode)")
+    new_parser.add_argument("--type", choices=["feat", "fix", "chore", "docs", "infra"], help="Issue type (required for non-interactive)")
     new_parser.add_argument("--area", action="append", help="Area label(s)")
     new_parser.add_argument("--phase", type=int, choices=[0, 1, 2, 3], help="Phase milestone")
     new_parser.add_argument("--body", help="Issue body text")
     new_parser.add_argument("--body-file", help="Read body from file")
+    new_parser.add_argument("--no-interview", action="store_true", help="Skip interactive interview")
+    new_parser.add_argument("--resume", help="Resume from saved session (not implemented yet)")
     
     # list
     list_parser = subparsers.add_parser("list", help="List issues")
