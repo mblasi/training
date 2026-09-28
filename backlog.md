@@ -4,7 +4,7 @@
 
 ## 🚧 En curso (WIP)
 
-_Nada por ahora._
+- [ ] [#7](https://github.com/mblasi/training/issues/7) docs: registrar decisiones de producto en DESIGN.md · docs · @mblasi
 
 ## 👀 En revisión
 
@@ -12,9 +12,7 @@ _Nada por ahora._
 
 ## 📋 Pendiente
 
-### Fase 0 - Fundaciones
-
-- [ ] [#7](https://github.com/mblasi/training/issues/7) docs: registrar decisiones de producto en DESIGN.md · docs
+_Nada por ahora._
 
 ## ✅ Hecho
 
