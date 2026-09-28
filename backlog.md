@@ -8,7 +8,7 @@ _Nada por ahora._
 
 ## 👀 En revisión
 
-- [ ] [#5](https://github.com/mblasi/training/issues/5) backlog take: spec de implementación acordada con el usuario + implementación TDD controlada por el harness · feat · @mblasi
+_Nada por ahora._
 
 ## 📋 Pendiente
 
@@ -16,5 +16,6 @@ _Nada por ahora._
 
 ## ✅ Hecho
 
+- [x] [#5](https://github.com/mblasi/training/issues/5) backlog take: spec de implementación acordada con el usuario + implementación TDD controlada por el harness · feat · @mblasi
 - [x] [#3](https://github.com/mblasi/training/issues/3) backlog new: agente entrevistador que especifica el issue antes de crearlo · feat · @mblasi
 - [x] [#1](https://github.com/mblasi/training/issues/1) Harness de gestión de issues: backlog.py + backlog.md sincronizado · chore · @mblasi
