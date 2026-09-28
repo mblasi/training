@@ -276,9 +276,82 @@ class TestBoundedToolLoop(unittest.TestCase):
     
     def test_tool_loop_bounded(self):
         """Test that excessive consecutive tool calls are bounded."""
-        # Skip this test - it requires the full repo structure
-        # The bounded loop is tested implicitly through integration
-        self.skipTest("Requires full repo structure for load_prompt")
+        # Fake client that always returns tool calls
+        call_count = [0]
+        
+        def mock_chat(messages, tools=None):
+            call_count[0] += 1
+            
+            # First few calls: return tool calls
+            if call_count[0] <= 15:
+                return {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "id": f"call_{call_count[0]}",
+                            "type": "function",
+                            "function": {
+                                "name": "read_file",
+                                "arguments": '{"path": "README.md"}'
+                            }
+                        }
+                    ]
+                }
+            else:
+                # After the intervention message, return text
+                return {
+                    "role": "assistant",
+                    "content": "OK, continuando con preguntas."
+                }
+        
+        mock_client = MagicMock()
+        mock_client.chat = mock_chat
+        
+        # Use existing_messages to avoid load_prompt
+        existing_messages = [
+            {"role": "system", "content": "You are an interviewer."},
+            {"role": "user", "content": "Start interview"}
+        ]
+        
+        outputs = []
+        def mock_print(text):
+            outputs.append(text)
+        
+        def mock_input(prompt):
+            # After the loop is bounded, user cancels
+            return "/cancelar"
+        
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sandbox = issue_agent.ToolSandbox(tmpdir)
+            
+            # Create a dummy README.md so tool calls succeed
+            readme = Path(tmpdir) / "README.md"
+            readme.write_text("# Test repo")
+            
+            spec, messages, session_id = issue_agent.run_interview(
+                mock_client,
+                sandbox,
+                tmpdir,
+                "",
+                existing_messages=existing_messages,
+                session_id="test_bounded",
+                input_fn=mock_input,
+                print_fn=mock_print
+            )
+            
+            # Verify that the loop injected the "stop using tools" message
+            intervention_messages = [
+                m for m in messages 
+                if m.get("role") == "user" and "herramientas" in m.get("content", "").lower()
+            ]
+            self.assertGreater(len(intervention_messages), 0, 
+                             "Should inject a message to stop using tools")
+            
+            # Verify chat was called enough times to hit the limit
+            # Max is 8, so we should see at least 9 tool-call responses before intervention
+            self.assertGreaterEqual(call_count[0], 9, 
+                                  "Should call chat multiple times before limiting")
 
 
 class TestSpecValidationAutoFix(unittest.TestCase):
@@ -286,9 +359,82 @@ class TestSpecValidationAutoFix(unittest.TestCase):
     
     def test_invalid_spec_fix_limit(self):
         """Test that invalid spec auto-fix is limited to 2 attempts."""
-        # Skip this test - it requires the full repo structure
-        # The auto-fix limit is tested implicitly through integration
-        self.skipTest("Requires full repo structure for load_prompt")
+        call_count = [0]
+        
+        def mock_chat(messages, tools=None):
+            call_count[0] += 1
+            
+            # Always return invalid spec (missing required field)
+            return {
+                "role": "assistant",
+                "content": '''/SPEC
+```json
+{
+  "issues": [
+    {
+      "type": "feat",
+      "body": "Test body"
+    }
+  ]
+}
+```
+'''
+            }
+        
+        mock_client = MagicMock()
+        mock_client.chat = mock_chat
+        
+        existing_messages = [
+            {"role": "system", "content": "You are an interviewer."},
+            {"role": "user", "content": "/listo"}
+        ]
+        
+        outputs = []
+        def mock_print(text):
+            outputs.append(text)
+        
+        input_calls = [0]
+        def mock_input(prompt):
+            input_calls[0] += 1
+            # After the fix limit is reached, user is asked for input
+            return "/cancelar"
+        
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sandbox = issue_agent.ToolSandbox(tmpdir)
+            
+            spec, messages, session_id = issue_agent.run_interview(
+                mock_client,
+                sandbox,
+                tmpdir,
+                "",
+                existing_messages=existing_messages,
+                session_id="test_fix_limit",
+                input_fn=mock_input,
+                print_fn=mock_print
+            )
+            
+            # Spec should be None (interview cancelled)
+            self.assertIsNone(spec)
+            
+            # Should have made exactly 2 auto-fix requests
+            auto_fix_messages = [
+                m for m in messages
+                if m.get("role") == "user" and "error" in m.get("content", "").lower()
+            ]
+            self.assertEqual(len(auto_fix_messages), 2, 
+                           "Should make exactly 2 auto-fix requests")
+            
+            # After 2 failed fixes, error should be shown to user (in outputs)
+            error_outputs = [
+                o for o in outputs
+                if "inválida" in o.lower() and "intentos" in o.lower()
+            ]
+            self.assertGreater(len(error_outputs), 0,
+                             "Should print error message after fix limit")
+            
+            # Input function should be called (to continue interview)
+            self.assertGreater(input_calls[0], 0,
+                             "Should call input_fn after fix limit reached")
 
 
 class TestFrontmatterParsing(unittest.TestCase):
