@@ -482,7 +482,7 @@ def cmd_list(args):
 
 
 def cmd_take(args):
-    """Take an issue: create branch, assign, mark WIP."""
+    """Take an issue: create branch, assign, mark WIP, optionally run design phase."""
     issue_num = args.issue
     
     if not is_working_tree_clean():
@@ -547,6 +547,206 @@ def cmd_take(args):
     ])
     
     print(f"Issue #{issue_num} is now WIP on branch {branch_name}")
+    
+    # If --no-plan, stop here (legacy behavior)
+    if args.no_plan:
+        return
+    
+    # Design phase
+    repo_root = git_toplevel()
+    specs_dir = Path(repo_root) / "docs" / "specs"
+    specs_dir.mkdir(parents=True, exist_ok=True)
+    spec_file = specs_dir / f"issue-{issue_num}.md"
+    
+    # Check if spec already exists
+    if spec_file.exists():
+        # Parse status
+        try:
+            import take_agent
+        except ImportError:
+            sys.path.insert(0, str(Path(__file__).parent))
+            import take_agent
+        
+        with open(spec_file, "r", encoding="utf-8") as f:
+            content = f.read()
+        
+        metadata, spec, progress = take_agent.parse_spec_markdown(content)
+        status = metadata.get("status", "draft")
+        
+        if status == "draft":
+            print("\nSpec en draft encontrada. Retomando diseño...")
+            # Resume design phase (load session if available)
+        elif status == "approved":
+            print(f"\nSpec aprobada en {spec_file}")
+            print(f"Para implementar, corré: python3 scripts/backlog.py impl {issue_num}")
+            if getattr(args, 'plan_only', False):
+                return
+            # In part 2: run TDD implementation
+            print("\n(Fase de implementación TDD será agregada en parte 2)")
+            return
+        elif status == "implementing":
+            print(f"\nImplementación en progreso. Spec: {spec_file}")
+            if getattr(args, 'plan_only', False):
+                return
+            # Resume TDD phase
+            print("\n(Fase de implementación TDD será agregada en parte 2)")
+            return
+        elif status == "done":
+            print(f"\nImplementación completa. Spec: {spec_file}")
+            print(f"Para crear el PR, corré: python3 scripts/backlog.py pr {issue_num}")
+            return
+    
+    # Run design phase
+    print("\n" + "=" * 80)
+    print("FASE DE DISEÑO")
+    print("=" * 80)
+    print()
+    
+    try:
+        import take_agent
+    except ImportError:
+        sys.path.insert(0, str(Path(__file__).parent))
+        import take_agent
+    
+    # Get LLM config
+    try:
+        import agent_core
+        base_url, api_key, model = agent_core.get_llm_config()
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+    
+    client = agent_core.LLMClient(base_url, api_key, model)
+    sandbox = agent_core.ToolSandbox(repo_root)
+    
+    # Load full issue (with comments)
+    full_issue = take_agent.load_issue(issue_num)
+    
+    # Run design interview
+    spec, messages, session_id = take_agent.run_design_phase(
+        client, sandbox, repo_root, full_issue
+    )
+    
+    if not spec:
+        print("Diseño cancelado o sin resultado.")
+        return
+    
+    # Preview and approval loop
+    while True:
+        print("\n" + "=" * 80)
+        print("PREVIEW DE LA ESPECIFICACIÓN")
+        print("=" * 80)
+        print()
+        
+        spec_md = take_agent.render_spec_markdown(spec, full_issue)
+        print(spec_md)
+        
+        print("\n" + "=" * 80)
+        print("Opciones:")
+        print("  [a]probar - guardar spec y commitear")
+        print("  [e]ditar - editar en $EDITOR")
+        print("  [s]eguir - continuar conversando con el agente")
+        print("  [x] salir - guardar como draft")
+        print("=" * 80)
+        
+        choice = input("\n> ").strip().lower()
+        
+        if choice == "a":
+            # Approve
+            with open(spec_file, "w", encoding="utf-8") as f:
+                f.write(spec_md)
+            
+            take_agent.set_status(str(spec_file), "approved")
+            
+            # Commit
+            run_command(["git", "add", str(spec_file)])
+            run_command(["git", "commit", "-m", f"docs: spec de implementación (#{issue_num})"])
+            
+            # Post comment to issue
+            summary = spec["summary"]
+            decisions_count = len(spec["decisions"])
+            tasks_count = len(spec["tasks"])
+            comment_body = f"""📋 **Especificación de implementación aprobada**
+
+**Resumen**: {summary}
+
+**Decisiones de diseño**: {decisions_count}
+**Tareas**: {tasks_count}
+**Test command**: `{spec['test_command']}`
+
+Ver especificación completa en `docs/specs/issue-{issue_num}.md` (rama `{branch_name}`).
+"""
+            run_command([
+                "gh", "issue", "comment", str(issue_num),
+                "--body", comment_body
+            ])
+            
+            print(f"\n✓ Spec guardada en {spec_file}")
+            print(f"✓ Commiteada")
+            print(f"✓ Comentario publicado en issue #{issue_num}")
+            print(f"\nPara implementar: python3 scripts/backlog.py impl {issue_num}")
+            break
+        
+        elif choice == "e":
+            # Edit
+            edited = agent_core.edit_in_editor(spec_md)
+            if edited:
+                try:
+                    metadata, new_spec, progress = take_agent.parse_spec_markdown(edited)
+                    # Validate
+                    valid, error = take_agent.validate_impl_spec(new_spec)
+                    if valid:
+                        spec = new_spec
+                        print("Especificación actualizada.")
+                    else:
+                        print(f"Error de validación: {error}")
+                        print("Cambios descartados.")
+                except Exception as e:
+                    print(f"Error parseando: {e}")
+                    print("Cambios descartados.")
+            else:
+                print("Edición cancelada.")
+        
+        elif choice == "s":
+            # Continue conversation
+            print("\nContinuando diseño. Escribí tu pregunta o ajuste:\n")
+            user_msg = input("> ").strip()
+            if not user_msg:
+                print("Cancelado.")
+                continue
+            
+            # Append user message and continue interview
+            messages.append({"role": "user", "content": user_msg})
+            
+            new_spec, messages, session_id = take_agent.run_design_phase(
+                client, sandbox, repo_root, full_issue,
+                existing_messages=messages,
+                session_id=session_id
+            )
+            
+            if new_spec:
+                spec = new_spec
+            else:
+                print("No se obtuvo nueva especificación.")
+        
+        elif choice == "x":
+            # Save as draft
+            with open(spec_file, "w", encoding="utf-8") as f:
+                f.write(spec_md)
+            
+            print(f"\n✓ Spec guardada como draft en {spec_file}")
+            print(f"Para continuar: python3 scripts/backlog.py take {issue_num}")
+            break
+        
+        else:
+            print("Opción inválida. Usá a/e/s/x.")
+    
+    if getattr(args, 'plan_only', False):
+        print("\n(--plan-only: fase de implementación omitida)")
+        return
+    
+    # TODO (part 2): run TDD implementation phase
+    print("\n(Fase de implementación TDD será agregada en parte 2)")
 
 
 def cmd_pr(args):
@@ -885,6 +1085,8 @@ def main():
     # take
     take_parser = subparsers.add_parser("take", help="Take an issue")
     take_parser.add_argument("issue", type=int, help="Issue number")
+    take_parser.add_argument("--plan-only", action="store_true", help="Only run design phase, skip implementation")
+    take_parser.add_argument("--no-plan", action="store_true", help="Skip design phase (legacy behavior)")
     
     # pr
     pr_parser = subparsers.add_parser("pr", help="Create PR for issue")
