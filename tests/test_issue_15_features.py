@@ -395,36 +395,7 @@ class TestSessionManagement(unittest.TestCase):
             self.assertEqual(session_id, "old_session")
 
 
-class TestRedPhaseRejectionAndValidation(unittest.TestCase):
-    """Test RED phase rejection of production files and validation."""
-    
-    def test_red_rejects_production_file(self):
-        """Test that RED phase rejects modifications to production files."""
-        # This is tested by test_red_touching_production_file_reverted in test_tdd_runner.py
-        # which uses a full acceptance test approach with a real git repo
-        pass
-    
-    def test_red_ran_test_command(self):
-        """Test that RED phase runs test command after validation."""
-        # This is tested by the acceptance tests in test_tdd_runner.py
-        # (test_happy_path_full_cycle and others) which verify the full flow
-        pass
 
-
-class TestGreenPhaseValidation(unittest.TestCase):
-    """Test GREEN phase file validation."""
-    
-    def test_green_allows_test_support_file_modification(self):
-        """Test that GREEN phase allows modifying test_support_files."""
-        # This is implicitly tested by the acceptance test in test_tdd_runner.py
-        # but we add an explicit unit test here
-        pass
-    
-    def test_green_detects_test_file_modification(self):
-        """Test that GREEN phase detects and reverts test file modifications."""
-        # Complex integration test - would need full git repo setup
-        # Already covered in test_tdd_runner.py acceptance tests
-        pass
 
 
 class TestReviewAndApprove(unittest.TestCase):

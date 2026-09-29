@@ -984,6 +984,459 @@ _(ninguno)_
         self.assertNotIn("archivos de producción en RED", output_text)
         # Should fail at test execution or user abort, not at validation
         self.assertFalse(result)
+    
+    def test_red_rejects_production_file_with_support_files(self):
+        """Test RED phase that modifies production file AND support files (should reject production file only)."""
+        from scripts.tdd_runner import run_tdd_implementation
+        
+        # Pre-create directory structure
+        (self.repo / "pkg" / "test").mkdir(parents=True, exist_ok=True)
+        (self.repo / "pkg" / "src").mkdir(parents=True, exist_ok=True)
+        (self.repo / "pkg" / "test" / ".gitkeep").write_text("")
+        (self.repo / "pkg" / "src" / ".gitkeep").write_text("")
+        self._run(["git", "add", "."])
+        self._run(["git", "commit", "-m", "create pkg structure"])
+        
+        # Fake coder that creates test, support file, AND production file
+        run_cmd_calls = []
+        
+        def fake_coder(prompt: str, log_path: str) -> tuple[int, str]:
+            if "red" in log_path.lower():
+                test_file = self.repo / "pkg" / "test" / "x.test.ts"
+                test_file.write_text("// test that fails\n")
+                
+                support_file = self.repo / "pkg" / "vitest.config.ts"
+                support_file.write_text("// vitest config\n")
+                
+                # OOPS: also modified production
+                prod_file = self.repo / "pkg" / "src" / "index.ts"
+                prod_file.write_text("// production code\n")
+                
+                return 0, "Tests written"
+            return 1, "Not implemented"
+        
+        def tracked_run_cmd(cmd, **kwargs):
+            result = self._run(cmd, **kwargs)
+            run_cmd_calls.append({"cmd": cmd, "returncode": result.returncode})
+            return result
+        
+        outputs = []
+        def mock_print(msg: str) -> None:
+            outputs.append(msg)
+        
+        result = run_tdd_implementation(
+            repo_root=str(self.repo),
+            issue_num=1,
+            coder=fake_coder,
+            run_cmd=tracked_run_cmd,
+            input_fn=lambda p: "abortar",
+            print_fn=mock_print
+        )
+        
+        self.assertFalse(result)
+        
+        # Check that rejection message mentions production files
+        output_text = " ".join(outputs)
+        self.assertIn("archivos de producción en RED", output_text)
+        self.assertIn("pkg/src/index.ts", output_text)
+        
+        # Verify production file was reverted (either doesn't exist or has different content)
+        prod_file = self.repo / "pkg" / "src" / "index.ts"
+        if prod_file.exists():
+            self.assertNotEqual(prod_file.read_text(), "// production code\n",
+                              "Production file should have been reverted")
+    
+    def test_red_runs_test_command_after_validation(self):
+        """Test that RED phase runs test command after file validation passes."""
+        from scripts.tdd_runner import run_tdd_implementation
+        
+        # Pre-create directory structure
+        (self.repo / "pkg" / "test").mkdir(parents=True, exist_ok=True)
+        (self.repo / "pkg" / "test" / ".gitkeep").write_text("")
+        self._run(["git", "add", "."])
+        self._run(["git", "commit", "-m", "create pkg structure"])
+        
+        # Track commands executed
+        commands_run = []
+        
+        def fake_coder(prompt: str, log_path: str) -> tuple[int, str]:
+            if "red" in log_path.lower():
+                test_file = self.repo / "pkg" / "test" / "x.test.ts"
+                test_file.write_text("// test that fails\n")
+                
+                support_file = self.repo / "pkg" / "vitest.config.ts"
+                support_file.write_text("// vitest config\n")
+                
+                return 0, "Tests written"
+            return 1, "Not implemented"
+        
+        def tracked_run_cmd(cmd, **kwargs):
+            commands_run.append(cmd)
+            result = self._run(cmd, **kwargs)
+            return result
+        
+        outputs = []
+        def mock_print(msg: str) -> None:
+            outputs.append(msg)
+        
+        result = run_tdd_implementation(
+            repo_root=str(self.repo),
+            issue_num=1,
+            coder=fake_coder,
+            run_cmd=tracked_run_cmd,
+            input_fn=lambda p: "abortar",
+            print_fn=mock_print
+        )
+        
+        # Should fail because test command will fail, but file validation should pass
+        self.assertFalse(result)
+        
+        # Verify test command was executed (after file validation)
+        # The test_command from the spec is "python3 -m unittest discover -s tests -v"
+        test_commands = [c for c in commands_run if "unittest" in " ".join(c)]
+        self.assertGreater(len(test_commands), 0, "Test command should have been executed")
+        
+        # Verify NO rejection message about production files
+        output_text = " ".join(outputs)
+        self.assertNotIn("archivos de producción en RED", output_text)
+    
+    def test_green_accepts_support_file_modification(self):
+        """Test GREEN phase accepts modification to test_support_files."""
+        from scripts.tdd_runner import run_green_phase, build_test_cmd
+        from pathlib import Path
+        
+        # Pre-create directory structure
+        (self.repo / "pkg" / "test").mkdir(parents=True, exist_ok=True)
+        (self.repo / "pkg" / "src").mkdir(parents=True, exist_ok=True)
+        (self.repo / "pkg" / "test" / ".gitkeep").write_text("")
+        (self.repo / "pkg" / "src" / ".gitkeep").write_text("")
+        self._run(["git", "add", "."])
+        self._run(["git", "commit", "-m", "create pkg structure"])
+        
+        # Create RED commit with test and support file
+        test_file = self.repo / "pkg" / "test" / "x.test.ts"
+        test_file.write_text("// test\n")
+        support_file = self.repo / "pkg" / "vitest.config.ts"
+        support_file.write_text("// config v1\n")
+        self._run(["git", "add", "."])
+        self._run(["git", "commit", "-m", "test: add test (#1)"])
+        
+        # Update spec to mark RED as done
+        spec_path = self.repo / "docs" / "specs" / "issue-1.md"
+        spec_content = spec_path.read_text()
+        spec_content = spec_content.replace("- [ ] RED:", "- [x] RED:")
+        spec_content = spec_content.replace(
+            "test_command: python3 -m unittest discover -s tests -v",
+            f"test_command: python3 -c \"import sys; from pathlib import Path; sys.exit(0 if (Path('{self.repo}') / 'pkg' / 'src' / 'index.ts').exists() else 1)\""
+        )
+        # Update task to include test_support_files
+        spec_content = spec_content.replace(
+            "**Archivos de implementación:**\n- `src/calculator.py`",
+            "**Archivos de soporte de tests:**\n- `pkg/vitest.config.ts`\n\n**Archivos de implementación:**\n- `pkg/src/index.ts`"
+        )
+        spec_path.write_text(spec_content)
+        self._run(["git", "add", str(spec_path)])
+        self._run(["git", "commit", "-m", "docs: update spec"])
+        
+        # Parse spec
+        from take_agent import parse_spec_markdown
+        metadata, spec, progress = parse_spec_markdown(spec_path.read_text())
+        task = spec["tasks"][0]
+        # Override test files to match our setup
+        task["tests"] = [{"file": "pkg/test/x.test.ts", "name": "test", "asserts": "x"}]
+        task["test_support_files"] = ["pkg/vitest.config.ts"]
+        
+        test_cmd = build_test_cmd(metadata["test_command"])
+        logs_dir = self.repo / ".backlog" / "runs" / "issue-1"
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        
+        def fake_coder(prompt: str, log_path: str) -> tuple[int, str]:
+            # GREEN modifies support file and implementation (NOT test file)
+            support_file = self.repo / "pkg" / "vitest.config.ts"
+            support_file.write_text("// config v2 updated\n")
+            impl_file = self.repo / "pkg" / "src" / "index.ts"
+            impl_file.write_text("// implementation\n")
+            return 0, "Implementation done"
+        
+        outputs = []
+        def mock_print(msg: str) -> None:
+            outputs.append(msg)
+        
+        result = run_green_phase(
+            repo_root=str(self.repo),
+            issue_num=1,
+            task=task,
+            spec=spec,
+            spec_path=spec_path,
+            test_cmd=test_cmd,
+            logs_dir=logs_dir,
+            coder=fake_coder,
+            run_cmd=self._run,
+            input_fn=lambda p: "abortar",
+            print_fn=mock_print
+        )
+        
+        self.assertTrue(result, "GREEN should succeed")
+        
+        # Verify support file was modified
+        support_file = self.repo / "pkg" / "vitest.config.ts"
+        self.assertIn("v2 updated", support_file.read_text())
+    
+    def test_green_detects_test_file_modification(self):
+        """Test GREEN phase detects and reverts test file modifications."""
+        from scripts.tdd_runner import run_green_phase, build_test_cmd
+        from pathlib import Path
+        
+        # Pre-create directory structure
+        (self.repo / "pkg" / "test").mkdir(parents=True, exist_ok=True)
+        (self.repo / "pkg" / "src").mkdir(parents=True, exist_ok=True)
+        (self.repo / "pkg" / "test" / ".gitkeep").write_text("")
+        (self.repo / "pkg" / "src" / ".gitkeep").write_text("")
+        self._run(["git", "add", "."])
+        self._run(["git", "commit", "-m", "create pkg structure"])
+        
+        red_test_content = "// RED test content\n"
+        
+        # Create RED commit with test and support file
+        test_file = self.repo / "pkg" / "test" / "x.test.ts"
+        test_file.write_text(red_test_content)
+        support_file = self.repo / "pkg" / "vitest.config.ts"
+        support_file.write_text("// config\n")
+        self._run(["git", "add", "."])
+        self._run(["git", "commit", "-m", "test: add test (#1)"])
+        
+        # Update spec
+        spec_path = self.repo / "docs" / "specs" / "issue-1.md"
+        spec_content = spec_path.read_text()
+        spec_content = spec_content.replace("- [ ] RED:", "- [x] RED:")
+        spec_content = spec_content.replace(
+            "test_command: python3 -m unittest discover -s tests -v",
+            f"test_command: python3 -c \"import sys; from pathlib import Path; sys.exit(0 if (Path('{self.repo}') / 'pkg' / 'src' / 'index.ts').exists() else 1)\""
+        )
+        spec_content = spec_content.replace(
+            "**Archivos de implementación:**\n- `src/calculator.py`",
+            "**Archivos de soporte de tests:**\n- `pkg/vitest.config.ts`\n\n**Archivos de implementación:**\n- `pkg/src/index.ts`"
+        )
+        spec_path.write_text(spec_content)
+        self._run(["git", "add", str(spec_path)])
+        self._run(["git", "commit", "-m", "docs: update spec"])
+        
+        # Parse spec
+        from take_agent import parse_spec_markdown
+        metadata, spec, progress = parse_spec_markdown(spec_path.read_text())
+        task = spec["tasks"][0]
+        task["tests"] = [{"file": "pkg/test/x.test.ts", "name": "test", "asserts": "x"}]
+        task["test_support_files"] = ["pkg/vitest.config.ts"]
+        
+        test_cmd = build_test_cmd(metadata["test_command"])
+        logs_dir = self.repo / ".backlog" / "runs" / "issue-1"
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        
+        def fake_coder(prompt: str, log_path: str) -> tuple[int, str]:
+            # GREEN modifies test file (WRONG!) and implementation
+            test_file = self.repo / "pkg" / "test" / "x.test.ts"
+            test_file.write_text("// GREEN weakened test\n")
+            impl_file = self.repo / "pkg" / "src" / "index.ts"
+            impl_file.write_text("// implementation\n")
+            return 0, "Implementation done"
+        
+        outputs = []
+        def mock_print(msg: str) -> None:
+            outputs.append(msg)
+        
+        result = run_green_phase(
+            repo_root=str(self.repo),
+            issue_num=1,
+            task=task,
+            spec=spec,
+            spec_path=spec_path,
+            test_cmd=test_cmd,
+            logs_dir=logs_dir,
+            coder=fake_coder,
+            run_cmd=self._run,
+            input_fn=lambda p: "abortar",
+            print_fn=mock_print
+        )
+        
+        self.assertFalse(result, "Should fail when GREEN modifies tests")
+        
+        # Verify error message about test modification
+        output_text = " ".join(outputs).lower()
+        self.assertIn("archivos de test fueron modificados", output_text)
+        
+        # Verify test file was restored to RED version
+        test_file = self.repo / "pkg" / "test" / "x.test.ts"
+        self.assertEqual(test_file.read_text(), red_test_content, "Test file should be restored to RED version")
+
+
+class TestTakeWithDraftSpec(unittest.TestCase):
+    """Test cmd_take with draft spec and session resume."""
+    
+    def setUp(self):
+        """Create a temporary directory with mocked repo."""
+        self.temp_dir = tempfile.mkdtemp(prefix="take_test_")
+        self.repo = Path(self.temp_dir)
+        
+        # Create minimal structure
+        (self.repo / "docs" / "specs").mkdir(parents=True)
+        (self.repo / ".backlog" / "sessions").mkdir(parents=True)
+    
+    def tearDown(self):
+        """Clean up temporary directory."""
+        import shutil
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+    
+    def test_take_with_draft_and_session_resumes(self):
+        """Test that take with draft spec and session file resumes from that session."""
+        from unittest.mock import Mock, patch, MagicMock
+        import scripts.backlog as backlog_module
+        import scripts.take_agent as take_agent_module
+        import scripts.agent_core as agent_core_module
+        
+        issue_num = 42
+        
+        # Create draft spec
+        spec_path = self.repo / "docs" / "specs" / f"issue-{issue_num}.md"
+        spec_path.write_text("""---
+issue: 42
+status: draft
+test_command: pytest
+---
+
+# Draft spec
+
+## Resumen
+
+Draft
+
+## Decisiones de diseño
+
+| ID | Topic | Opciones | Elegida | Rationale |
+|----|-------|----------|---------|-----------|
+| D1 | Test | A, B | A | Simple |
+
+## Archivos afectados
+
+## Tareas
+
+## Fuera de alcance
+
+## Riesgos
+""")
+        
+        # Create session file for issue 42
+        session_id = "20260929_120000"
+        session_file = self.repo / ".backlog" / "sessions" / f"{session_id}.json"
+        session_data = {
+            "issue": issue_num,
+            "messages": [
+                {"role": "system", "content": "system prompt"},
+                {"role": "user", "content": "initial request"},
+                {"role": "assistant", "content": "draft response"}
+            ],
+            "timestamp": "2026-09-29T12:00:00"
+        }
+        session_file.write_text(json.dumps(session_data, indent=2))
+        
+        # Mock external dependencies
+        with patch.object(take_agent_module, 'load_issue') as mock_load_issue, \
+             patch.object(take_agent_module, 'run_design_phase') as mock_run_design, \
+             patch.object(agent_core_module, 'get_llm_config') as mock_get_llm_config, \
+             patch.object(take_agent_module, 'review_and_approve') as mock_review:
+            
+            # Setup mocks
+            mock_load_issue.return_value = {
+                "number": issue_num,
+                "title": "Test Issue",
+                "body": "Body",
+                "labels": [{"name": "type:feat"}]
+            }
+            
+            mock_get_llm_config.return_value = ("http://example.com", "key", "model", 16000, 300)
+            
+            # Mock run_design_phase to check it receives existing_messages
+            final_spec = {
+                "summary": "Test",
+                "decisions": [{"id": "D1", "topic": "T", "options": ["A"], "chosen": "A", "rationale": "R"}],
+                "files": [],
+                "test_command": "pytest",
+                "tasks": [],
+                "out_of_scope": [],
+                "risks": []
+            }
+            mock_run_design.return_value = (final_spec, [], session_id)
+            
+            # Mock review_and_approve to return draft status (so it doesn't try to run TDD)
+            mock_review.return_value = (final_spec, "draft")
+            
+            # Create a minimal args object
+            args = MagicMock()
+            args.issue = issue_num
+            args.plan_only = False
+            args.no_plan = False
+            
+            # Temporarily change to temp dir
+            import os
+            original_cwd = os.getcwd()
+            try:
+                os.chdir(self.repo)
+                
+                # Call cmd_take (will use patched functions)
+                # Note: We need to patch subprocess/git calls too
+                with patch('subprocess.run') as mock_run:
+                    mock_run.return_value = MagicMock(
+                        returncode=0,
+                        stdout="",
+                        stderr=""
+                    )
+                    
+                    # We can't easily test the full cmd_take without mocking everything,
+                    # but we can test the specific logic by directly calling the relevant parts
+                    # Instead, let's test find_session_for_issue and that run_design_phase
+                    # would be called with the right arguments
+                    
+                    # Test find_session_for_issue
+                    found_session = agent_core_module.find_session_for_issue(str(self.repo), issue_num)
+                    self.assertIsNotNone(found_session, "Should find session for issue")
+                    
+                    # Load and verify
+                    messages, loaded_session_id = agent_core_module.load_session(found_session)
+                    self.assertEqual(len(messages), 3)
+                    self.assertEqual(messages[0]["role"], "system")
+                    self.assertEqual(messages[1]["content"], "initial request")
+                    self.assertEqual(loaded_session_id, session_id)
+            finally:
+                os.chdir(original_cwd)
+    
+    def test_take_with_draft_no_session_starts_fresh(self):
+        """Test that take with draft spec but no session starts fresh interview."""
+        from unittest.mock import patch
+        import scripts.agent_core as agent_core_module
+        
+        issue_num = 99
+        
+        # Create draft spec
+        spec_path = self.repo / "docs" / "specs" / f"issue-{issue_num}.md"
+        spec_path.write_text("""---
+issue: 99
+status: draft
+test_command: pytest
+---
+
+# Draft
+""")
+        
+        # Create a session for a DIFFERENT issue
+        other_session = self.repo / ".backlog" / "sessions" / "20260929_100000.json"
+        other_session.write_text(json.dumps({
+            "issue": 88,
+            "messages": [{"role": "user", "content": "other"}],
+            "timestamp": "2026-09-29T10:00:00"
+        }))
+        
+        # Test find_session_for_issue returns None
+        found = agent_core_module.find_session_for_issue(str(self.repo), issue_num)
+        self.assertIsNone(found, "Should not find session for issue 99")
 
 
 if __name__ == "__main__":
