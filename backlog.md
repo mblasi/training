@@ -4,11 +4,11 @@
 
 ## 🚧 En curso (WIP)
 
-- [ ] ⛔ [#9](https://github.com/mblasi/training/issues/9) Monorepo pnpm: apps/api, apps/admin, apps/mobile, packages/shared + CI · chore · @mblasi
+- [ ] [#9](https://github.com/mblasi/training/issues/9) Monorepo pnpm: apps/api, apps/admin, apps/mobile, packages/shared + CI · chore · @mblasi
 
 ## 👀 En revisión
 
-- [ ] [#21](https://github.com/mblasi/training/issues/21) Harness: lockfiles permitidos en RED y /DESVIO sin consumir intento · fix · @mblasi
+_Nada por ahora._
 
 ## 📋 Pendiente
 
@@ -22,6 +22,7 @@
 
 ## ✅ Hecho
 
+- [x] [#21](https://github.com/mblasi/training/issues/21) Harness: lockfiles permitidos en RED y /DESVIO sin consumir intento · fix · @mblasi
 - [x] [#19](https://github.com/mblasi/training/issues/19) Harness: falso positivo en detección de corridas vacías (matchea docstrings de tests) · fix · @mblasi
 - [x] [#17](https://github.com/mblasi/training/issues/17) Harness: prompt de RED/GREEN con test_support_files y detección de corridas vacías · fix · @mblasi
 - [x] [#15](https://github.com/mblasi/training/issues/15) Harness: soporte TDD para monorepo TS/JS y fixes del take (seguir, spec truncada, retomar draft) · fix · @mblasi
