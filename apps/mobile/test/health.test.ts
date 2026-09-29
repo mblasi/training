@@ -7,6 +7,7 @@ describe('mobile health logic', () => {
       status: 'ok',
       version: '0.1.0',
       timestamp: new Date().toISOString(),
+      db: 'ok',
     };
 
     const parsed = parseHealthResponse(validResponse);
@@ -14,6 +15,7 @@ describe('mobile health logic', () => {
     expect(parsed.status).toBe('ok');
     expect(parsed.version).toBe('0.1.0');
     expect(parsed.timestamp).toBeTruthy();
+    expect(parsed.db).toBe('ok');
   });
 
   it('parseHealthResponse throws on invalid data', () => {

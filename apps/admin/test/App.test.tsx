@@ -15,10 +15,12 @@ describe('Admin App', () => {
       status: 'ok',
       version: '0.1.0',
       timestamp: new Date().toISOString(),
+      db: 'ok',
     };
     const parsed = parseHealthResponse(validResponse);
     expect(parsed.status).toBe('ok');
     expect(parsed.version).toBe('0.1.0');
+    expect(parsed.db).toBe('ok');
   });
 
   test('parseHealthResponse throws on invalid response', () => {
