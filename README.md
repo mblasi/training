@@ -59,6 +59,14 @@ Servidor web:
 corepack pnpm --filter ./apps/mobile web
 ```
 
+Build web:
+
+```bash
+corepack pnpm --filter ./apps/mobile exec expo export --platform web --output-dir dist-web
+```
+
+**Nota**: Expo SDK 57 funciona con pnpm en modo isolated (sin `node-linker=hoisted`). El setup usa `metro.config.js` para resolver workspaces y `babel.config.cjs` con `babel-preset-expo`.
+
 ## Flujo de trabajo
 
 Este proyecto usa un workflow basado en GitHub Issues manejado por `scripts/backlog.py`.

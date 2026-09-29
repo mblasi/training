@@ -11,20 +11,23 @@
     "lint": "eslint ."
   },
   "dependencies": {
+    "@babel/runtime": "^8.0.5",
     "@trainia/shared": "workspace:*",
-    "expo": "^52.0.0",
-    "expo-router": "^4.0.0",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "react-native": "^0.76.0",
-    "react-native-web": "~0.19.13"
+    "babel-preset-expo": "^57.0.13",
+    "expo": "^57.0.26",
+    "expo-router": "~57.0.24",
+    "react": "19.2.3",
+    "react-dom": "19.2.3",
+    "react-native": "0.86.3",
+    "react-native-web": "~0.21.0"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
-    "@types/react": "^18.3.0",
-    "eslint": "^9.0.0",
-    "typescript": "^5.7.0",
+    "@types/react": "~19.2.18",
+    "eslint": "^10.0.0",
+    "eslint-config-expo": "^57.0.0",
+    "typescript": "~6.0.3",
     "typescript-eslint": "^8.71.0",
-    "vitest": "^3.0.0"
+    "vitest": "^5.0.0"
   }
 }
