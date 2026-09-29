@@ -26,6 +26,49 @@ EMPTY_RUN_SIGNALS = [
     re.compile(r"^\s*Ran 0 tests\b", re.MULTILINE),
 ]
 
+# Dependency infrastructure filenames (allowed in RED, always allowed in GREEN)
+DEPENDENCY_INFRA_FILENAMES = {
+    "pnpm-lock.yaml",
+    "pnpm-workspace.yaml",
+    "package-lock.json",
+    "yarn.lock",
+    "poetry.lock",
+    "uv.lock",
+}
+
+# Maximum /DESVIOs allowed per phase before stopping
+MAX_DESVIOS_PER_PHASE = 3
+
+
+def is_dependency_infra_file(path: str) -> bool:
+    """
+    Check if a file is a dependency infrastructure file (lockfile, requirements.txt).
+    
+    These files are always allowed in RED (not counted as production code).
+    
+    Matches:
+    - Known lockfiles (basename match): pnpm-lock.yaml, package-lock.json, yarn.lock, 
+      poetry.lock, uv.lock, pnpm-workspace.yaml
+    - requirements*.txt pattern (e.g. requirements.txt, requirements-dev.txt)
+    
+    Args:
+        path: File path (relative or absolute)
+    
+    Returns:
+        True if the file is a dependency infra file, False otherwise.
+    """
+    basename = Path(path).name
+    
+    # Check known lockfiles
+    if basename in DEPENDENCY_INFRA_FILENAMES:
+        return True
+    
+    # Check requirements*.txt pattern
+    if basename.startswith("requirements") and basename.endswith(".txt"):
+        return True
+    
+    return False
+
 
 def build_coder_cmd(prompt: str, env: dict[str, str] | None = None) -> list[str]:
     """
@@ -480,10 +523,17 @@ def run_red_phase(
     task_id = task["id"]
     max_attempts = 2  # Initial + 1 retry
     last_feedback = None
+    last_decision = None  # Decision from last /DESVIO
+    desvio_count = 0  # Track /DESVIO count for cap
     
-    for attempt in range(max_attempts):
+    attempt = 0
+    while attempt < max_attempts:
         # Build prompt
         prompt = build_red_prompt(spec, task)
+        
+        # Append decision from last /DESVIO if any
+        if last_decision:
+            prompt += f"\n\n**Decisión tomada para tu /DESVIO:** {last_decision}\n"
         
         # Append feedback from previous attempt if any
         if last_feedback:
@@ -500,10 +550,19 @@ def run_red_phase(
             user_choice = input_fn("Reintentar o abortar? (r/abortar): ").strip().lower()
             if user_choice == "abortar":
                 return False
+            attempt += 1
             continue
         
         # Check for /DESVIO
         if desvio := detect_desvio(output):
+            desvio_count += 1
+            
+            # Check cap
+            if desvio_count > MAX_DESVIOS_PER_PHASE:
+                print_fn(f"\nError: se alcanzó el límite de {MAX_DESVIOS_PER_PHASE} desvíos por fase.")
+                print_fn("La fase RED no puede completarse con tantas decisiones adicionales.")
+                return False
+            
             print_fn(f"\n/DESVIO detectado: {desvio}\n")
             print_fn("¿Cuál es tu decisión?")
             decision = input_fn("> ").strip()
@@ -525,8 +584,13 @@ def run_red_phase(
             )
             
             print_fn("Decisión registrada. Reintentando fase RED...\n")
-            # Retry this phase
+            
+            # Store decision for next prompt, DO NOT consume attempt
+            last_decision = decision
             continue
+        
+        # Clear last_decision and last_feedback after successful non-/DESVIO call
+        last_decision = None
         
         # Verify only test files were changed
         changed = get_changed_files(repo_root, run_cmd)
@@ -535,6 +599,7 @@ def run_red_phase(
             print_fn("Advertencia: coder no modificó ningún archivo.")
             if attempt < max_attempts - 1:
                 print_fn("Reintentando...\n")
+                attempt += 1
                 continue
             else:
                 user_choice = input_fn("Continuar o abortar? (continuar/abortar): ").strip().lower()
@@ -543,15 +608,27 @@ def run_red_phase(
                 break
         
         # Check if non-test files were modified
-        # Allowed in RED: test files (by pattern or listed in tests[].file) and test_support_files
+        # Allowed in RED: test files (by pattern or listed in tests[].file), test_support_files,
+        # and dependency infra files (lockfiles, requirements.txt)
         test_files_in_task = [t["file"] for t in task["tests"]]
         test_support_files = task.get("test_support_files", [])
+        impl_files = task.get("impl_files", [])
         allowed_in_red = set(test_files_in_task + test_support_files)
         
-        non_test_changes = [
-            f for f in changed
-            if not is_test_file(f) and f not in allowed_in_red
-        ]
+        non_test_changes = []
+        for f in changed:
+            # Skip if it's a test file (by pattern or in task.tests)
+            if is_test_file(f) or f in allowed_in_red:
+                continue
+            # Skip if it's a dependency infra file
+            if is_dependency_infra_file(f):
+                continue
+            # Reject if it's in impl_files (explicitly forbidden)
+            if f in impl_files:
+                non_test_changes.append(f)
+                continue
+            # Otherwise it's a non-test, non-allowed file
+            non_test_changes.append(f)
         
         if non_test_changes:
             print_fn(f"Error: se modificaron archivos de producción en RED: {non_test_changes}")
@@ -560,6 +637,7 @@ def run_red_phase(
             
             if attempt < max_attempts - 1:
                 print_fn("Reintentando RED...\n")
+                attempt += 1
                 continue
             else:
                 user_choice = input_fn("Continuar o abortar? (continuar/abortar): ").strip().lower()
@@ -586,6 +664,7 @@ def run_red_phase(
             if attempt < max_attempts - 1:
                 print_fn("Reintentando RED con feedback...\n")
                 last_feedback = f"No se ejecutó ningún test: {empty_signal}\n\nCreá los test_support_files necesarios para que el runner encuentre los tests."
+                attempt += 1
                 continue
             else:
                 user_choice = input_fn("Continuar o abortar? (continuar/abortar): ").strip().lower()
@@ -613,6 +692,7 @@ def run_red_phase(
             
             if attempt < max_attempts - 1:
                 print_fn("Reintentando RED...\n")
+                attempt += 1
                 continue
             else:
                 user_choice = input_fn("Continuar o abortar? (continuar/abortar): ").strip().lower()
@@ -661,14 +741,21 @@ def run_green_phase(
     """
     task_id = task["id"]
     max_attempts = 3
+    last_decision = None  # Decision from last /DESVIO
+    desvio_count = 0  # Track /DESVIO count for cap
     
     # Record test file hashes after RED
     test_files = [t["file"] for t in task["tests"]]
     test_hashes = get_file_hashes(repo_root, test_files, run_cmd)
     
-    for attempt in range(max_attempts):
+    attempt = 0
+    while attempt < max_attempts:
         # Build prompt
         prompt = build_green_prompt(spec, task, attempt)
+        
+        # Append decision from last /DESVIO if any
+        if last_decision:
+            prompt += f"\n\n**Decisión tomada para tu /DESVIO:** {last_decision}\n"
         
         # If not first attempt, include last test output
         if attempt > 0:
@@ -685,17 +772,28 @@ def run_green_phase(
         if exit_code != 0:
             print_fn(f"Error: coder falló con código {exit_code}")
             if attempt < max_attempts - 1:
+                attempt += 1
                 continue
             else:
                 user_choice = input_fn("Reintentar o abortar? (reintentar/abortar): ").strip().lower()
                 if user_choice == "reintentar":
+                    # Increment BOTH to maintain the "last attempt" state
                     max_attempts += 1
+                    attempt += 1
                     continue
                 else:
                     return False
         
         # Check for /DESVIO
         if desvio := detect_desvio(output):
+            desvio_count += 1
+            
+            # Check cap
+            if desvio_count > MAX_DESVIOS_PER_PHASE:
+                print_fn(f"\nError: se alcanzó el límite de {MAX_DESVIOS_PER_PHASE} desvíos por fase.")
+                print_fn("La fase GREEN no puede completarse con tantas decisiones adicionales.")
+                return False
+            
             print_fn(f"\n/DESVIO detectado: {desvio}\n")
             print_fn("¿Cuál es tu decisión?")
             decision = input_fn("> ").strip()
@@ -717,7 +815,13 @@ def run_green_phase(
             )
             
             print_fn("Decisión registrada. Reintentando fase GREEN...\n")
+            
+            # Store decision for next prompt, DO NOT consume attempt
+            last_decision = decision
             continue
+        
+        # Clear last_decision after successful non-/DESVIO call
+        last_decision = None
         
         # Verify test files unchanged
         new_hashes = get_file_hashes(repo_root, test_files, run_cmd)
@@ -729,12 +833,15 @@ def run_green_phase(
             
             if attempt < max_attempts - 1:
                 print_fn("Reintentando GREEN...\n")
+                attempt += 1
                 continue
             else:
                 user_choice = input_fn("Reintentar o abortar? (reintentar/abortar): ").strip().lower()
                 if user_choice == "abortar":
                     return False
                 max_attempts += 1
+                # Increment BOTH to maintain "last attempt" state
+                attempt += 1
                 continue
         
         # Run tests (must PASS)
@@ -751,12 +858,15 @@ def run_green_phase(
             
             if attempt < max_attempts - 1:
                 print_fn("Reintentando GREEN...\n")
+                attempt += 1
                 continue
             else:
                 user_choice = input_fn("Reintentar o abortar? (reintentar/abortar): ").strip().lower()
                 if user_choice == "abortar":
                     return False
                 max_attempts += 1
+                # Increment BOTH to maintain "last attempt" state
+                attempt += 1
                 continue
         
         if test_result.returncode != 0:
@@ -764,12 +874,15 @@ def run_green_phase(
             
             if attempt < max_attempts - 1:
                 print_fn("Reintentando GREEN...\n")
+                attempt += 1
                 continue
             else:
                 user_choice = input_fn("Reintentar o abortar? (reintentar/abortar): ").strip().lower()
                 if user_choice == "abortar":
                     return False
                 max_attempts += 1
+                # Increment BOTH to maintain "last attempt" state
+                attempt += 1
                 continue
         
         # Tests passed - commit
