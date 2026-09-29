@@ -113,9 +113,15 @@ def is_test_file(path: str) -> bool:
 
 
 def get_changed_files(repo_root: str, run_cmd: Callable) -> list[str]:
-    """Get list of changed files from git status --porcelain."""
+    """
+    Get list of changed files from git status --porcelain.
+    
+    Uses --untracked-files=all to list individual files in new directories.
+    Handles renames (R  old -> new) by taking the new path.
+    Handles quoted paths with escapes.
+    """
     result = run_cmd(
-        ["git", "status", "--porcelain"],
+        ["git", "status", "--porcelain", "--untracked-files=all"],
         cwd=repo_root,
         timeout=5
     )
@@ -124,12 +130,27 @@ def get_changed_files(repo_root: str, run_cmd: Callable) -> list[str]:
         return []
     
     changed = []
-    for line in result.stdout.strip().split("\n"):
-        if line.strip():
-            # Format: "XY path" where XY is status code
-            parts = line.split(maxsplit=1)
-            if len(parts) == 2:
-                changed.append(parts[1])
+    for line in result.stdout.splitlines():
+        if not line.strip():
+            continue
+        
+        # Format: "XY path" or "XY old -> new" for renames
+        # Paths may be quoted if they contain special chars
+        status = line[:2]
+        path_part = line[3:]  # Skip "XY "
+        
+        # Handle renames: "R  old -> new"
+        if status.strip().startswith("R"):
+            if " -> " in path_part:
+                # Take the new path
+                path_part = path_part.split(" -> ", 1)[1]
+        
+        # Handle quoted paths: git quotes paths with special chars and escapes spaces/quotes
+        if path_part.startswith('"') and path_part.endswith('"'):
+            # Remove quotes and unescape (simple: just remove backslashes before common chars)
+            path_part = path_part[1:-1].replace('\\"', '"').replace('\\\\', '\\')
+        
+        changed.append(path_part)
     
     return changed
 

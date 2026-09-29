@@ -13,6 +13,124 @@ from pathlib import Path
 from typing import Any
 
 
+class TestGetChangedFiles(unittest.TestCase):
+    """Unit tests for get_changed_files function."""
+    
+    def setUp(self):
+        """Create a temporary git repo for testing."""
+        self.temp_dir = tempfile.mkdtemp(prefix="test_get_changed_")
+        self.repo = Path(self.temp_dir)
+        
+        # Initialize git repo
+        self._run(["git", "init", "-q"])
+        self._run(["git", "config", "user.email", "test@test.com"])
+        self._run(["git", "config", "user.name", "Test User"])
+        
+        # Initial commit
+        (self.repo / "README.md").write_text("# Test\n")
+        self._run(["git", "add", "."])
+        self._run(["git", "commit", "-qm", "initial"])
+    
+    def tearDown(self):
+        """Clean up temporary repo."""
+        import shutil
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+    
+    def _run(self, cmd: list[str], cwd: str = None, timeout: int = None) -> subprocess.CompletedProcess:
+        """Run a command in the temp repo."""
+        return subprocess.run(
+            cmd,
+            cwd=cwd or self.repo,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False
+        )
+    
+    def test_new_nested_directory_lists_individual_files(self):
+        """Test get_changed_files with brand-new nested directories returns individual file paths."""
+        from scripts.tdd_runner import get_changed_files
+        
+        # Create files in a new nested directory structure (not tracked)
+        (self.repo / "pkg" / "src" / "nested").mkdir(parents=True)
+        (self.repo / "pkg" / "src" / "index.ts").write_text("// index\n")
+        (self.repo / "pkg" / "src" / "nested" / "util.ts").write_text("// util\n")
+        (self.repo / "pkg" / "test").mkdir(parents=True)
+        (self.repo / "pkg" / "test" / "x.test.ts").write_text("// test\n")
+        (self.repo / "pkg" / "vitest.config.ts").write_text("// config\n")
+        
+        # Get changed files
+        changed = get_changed_files(str(self.repo), self._run)
+        
+        # Should list individual files, not "pkg/"
+        self.assertIn("pkg/src/index.ts", changed)
+        self.assertIn("pkg/src/nested/util.ts", changed)
+        self.assertIn("pkg/test/x.test.ts", changed)
+        self.assertIn("pkg/vitest.config.ts", changed)
+        self.assertNotIn("pkg/", changed)
+        self.assertNotIn("pkg/src/", changed)
+    
+    def test_handles_renames(self):
+        """Test get_changed_files handles git renames (R old -> new)."""
+        from scripts.tdd_runner import get_changed_files
+        
+        # Create and commit a file
+        (self.repo / "old.txt").write_text("content\n")
+        self._run(["git", "add", "old.txt"])
+        self._run(["git", "commit", "-qm", "add old.txt"])
+        
+        # Rename it
+        self._run(["git", "mv", "old.txt", "new.txt"])
+        
+        # Get changed files
+        changed = get_changed_files(str(self.repo), self._run)
+        
+        # Should include the new path
+        self.assertIn("new.txt", changed)
+        self.assertNotIn("old.txt", changed)
+    
+    def test_handles_quoted_paths(self):
+        """Test get_changed_files handles quoted paths with special chars."""
+        from scripts.tdd_runner import get_changed_files
+        
+        # Create file with space in name (git quotes these)
+        file_with_space = self.repo / "file with space.txt"
+        file_with_space.write_text("content\n")
+        
+        # Get changed files
+        changed = get_changed_files(str(self.repo), self._run)
+        
+        # Should include the unquoted path
+        self.assertIn("file with space.txt", changed)
+    
+    def test_first_line_with_leading_space_parsed_correctly(self):
+        """Test get_changed_files when FIRST line starts with a space (e.g. ' M a.py') plus new nested file."""
+        from scripts.tdd_runner import get_changed_files
+        
+        # Create and commit a file
+        (self.repo / "a.py").write_text("# version 1\n")
+        self._run(["git", "add", "a.py"])
+        self._run(["git", "commit", "-qm", "add a.py"])
+        
+        # Modify it (creates " M a.py" as FIRST line of porcelain output)
+        (self.repo / "a.py").write_text("# version 2\n")
+        
+        # Create new nested untracked file
+        (self.repo / "pkg" / "test").mkdir(parents=True)
+        (self.repo / "pkg" / "test" / "x.test.ts").write_text("// test\n")
+        
+        # Get changed files
+        changed = get_changed_files(str(self.repo), self._run)
+        
+        # Should parse both paths correctly
+        self.assertIn("a.py", changed, "Modified file should be parsed correctly")
+        self.assertIn("pkg/test/x.test.ts", changed, "New nested file should be parsed correctly")
+        
+        # Make sure we didn't truncate the first character of a.py
+        self.assertNotIn("py", [f for f in changed if len(f) == 2])  # Ensure no ".py" artifact
+        self.assertNotIn(".py", [f for f in changed if len(f) == 3])  # Ensure no "a.py" truncated to ".py"
+
+
 class TestTDDRunner(unittest.TestCase):
     """Test TDD state machine with a real temporary git repo."""
     
@@ -939,25 +1057,19 @@ _(ninguno)_
         self._run(["git", "commit", "-m", "docs: spec (#1)"])
     
     def test_red_with_support_files_accepted(self):
-        """Test RED phase accepts changes to test_support_files."""
+        """Test RED phase accepts changes to test_support_files in brand-new directories."""
         from scripts.tdd_runner import run_tdd_implementation
-        
-        # Pre-create the directory structure so git doesn't see it as new
-        (self.repo / "pkg" / "test").mkdir(parents=True, exist_ok=True)
-        (self.repo / "pkg" / "src").mkdir(parents=True, exist_ok=True)
-        (self.repo / "pkg" / "test" / ".gitkeep").write_text("")
-        (self.repo / "pkg" / "src" / ".gitkeep").write_text("")
-        self._run(["git", "add", "."])
-        self._run(["git", "commit", "-m", "create pkg structure"])
         
         # Fake coder that creates test file + support file
         def fake_coder(prompt: str, log_path: str) -> tuple[int, str]:
             if "red" in log_path.lower():
                 # Create test file and support file
                 test_file = self.repo / "pkg" / "test" / "x.test.ts"
+                test_file.parent.mkdir(parents=True, exist_ok=True)
                 test_file.write_text("// test that fails\n")
                 
                 support_file = self.repo / "pkg" / "vitest.config.ts"
+                support_file.parent.mkdir(parents=True, exist_ok=True)
                 support_file.write_text("// vitest config\n")
                 
                 return 0, "Tests written"
@@ -986,16 +1098,8 @@ _(ninguno)_
         self.assertFalse(result)
     
     def test_red_rejects_production_file_with_support_files(self):
-        """Test RED phase that modifies production file AND support files (should reject production file only)."""
+        """Test RED phase that modifies production file AND support files (should reject production file only) in new dirs."""
         from scripts.tdd_runner import run_tdd_implementation
-        
-        # Pre-create directory structure
-        (self.repo / "pkg" / "test").mkdir(parents=True, exist_ok=True)
-        (self.repo / "pkg" / "src").mkdir(parents=True, exist_ok=True)
-        (self.repo / "pkg" / "test" / ".gitkeep").write_text("")
-        (self.repo / "pkg" / "src" / ".gitkeep").write_text("")
-        self._run(["git", "add", "."])
-        self._run(["git", "commit", "-m", "create pkg structure"])
         
         # Fake coder that creates test, support file, AND production file
         run_cmd_calls = []
@@ -1003,13 +1107,16 @@ _(ninguno)_
         def fake_coder(prompt: str, log_path: str) -> tuple[int, str]:
             if "red" in log_path.lower():
                 test_file = self.repo / "pkg" / "test" / "x.test.ts"
+                test_file.parent.mkdir(parents=True, exist_ok=True)
                 test_file.write_text("// test that fails\n")
                 
                 support_file = self.repo / "pkg" / "vitest.config.ts"
+                support_file.parent.mkdir(parents=True, exist_ok=True)
                 support_file.write_text("// vitest config\n")
                 
                 # OOPS: also modified production
                 prod_file = self.repo / "pkg" / "src" / "index.ts"
+                prod_file.parent.mkdir(parents=True, exist_ok=True)
                 prod_file.write_text("// production code\n")
                 
                 return 0, "Tests written"
@@ -1040,21 +1147,13 @@ _(ninguno)_
         self.assertIn("archivos de producción en RED", output_text)
         self.assertIn("pkg/src/index.ts", output_text)
         
-        # Verify production file was reverted (either doesn't exist or has different content)
+        # Verify production file was reverted (must not exist after revert in new dir)
         prod_file = self.repo / "pkg" / "src" / "index.ts"
-        if prod_file.exists():
-            self.assertNotEqual(prod_file.read_text(), "// production code\n",
-                              "Production file should have been reverted")
+        self.assertFalse(prod_file.exists(), "Production file pkg/src/index.ts should have been reverted")
     
     def test_red_runs_test_command_after_validation(self):
-        """Test that RED phase runs test command after file validation passes."""
+        """Test that RED phase runs test command after file validation passes in new dirs."""
         from scripts.tdd_runner import run_tdd_implementation
-        
-        # Pre-create directory structure
-        (self.repo / "pkg" / "test").mkdir(parents=True, exist_ok=True)
-        (self.repo / "pkg" / "test" / ".gitkeep").write_text("")
-        self._run(["git", "add", "."])
-        self._run(["git", "commit", "-m", "create pkg structure"])
         
         # Track commands executed
         commands_run = []
@@ -1062,9 +1161,11 @@ _(ninguno)_
         def fake_coder(prompt: str, log_path: str) -> tuple[int, str]:
             if "red" in log_path.lower():
                 test_file = self.repo / "pkg" / "test" / "x.test.ts"
+                test_file.parent.mkdir(parents=True, exist_ok=True)
                 test_file.write_text("// test that fails\n")
                 
                 support_file = self.repo / "pkg" / "vitest.config.ts"
+                support_file.parent.mkdir(parents=True, exist_ok=True)
                 support_file.write_text("// vitest config\n")
                 
                 return 0, "Tests written"
@@ -1105,16 +1206,9 @@ _(ninguno)_
         from scripts.tdd_runner import run_green_phase, build_test_cmd
         from pathlib import Path
         
-        # Pre-create directory structure
-        (self.repo / "pkg" / "test").mkdir(parents=True, exist_ok=True)
-        (self.repo / "pkg" / "src").mkdir(parents=True, exist_ok=True)
-        (self.repo / "pkg" / "test" / ".gitkeep").write_text("")
-        (self.repo / "pkg" / "src" / ".gitkeep").write_text("")
-        self._run(["git", "add", "."])
-        self._run(["git", "commit", "-m", "create pkg structure"])
-        
-        # Create RED commit with test and support file
+        # Create RED commit with test and support file (in new dir)
         test_file = self.repo / "pkg" / "test" / "x.test.ts"
+        test_file.parent.mkdir(parents=True, exist_ok=True)
         test_file.write_text("// test\n")
         support_file = self.repo / "pkg" / "vitest.config.ts"
         support_file.write_text("// config v1\n")
@@ -1155,6 +1249,7 @@ _(ninguno)_
             support_file = self.repo / "pkg" / "vitest.config.ts"
             support_file.write_text("// config v2 updated\n")
             impl_file = self.repo / "pkg" / "src" / "index.ts"
+            impl_file.parent.mkdir(parents=True, exist_ok=True)
             impl_file.write_text("// implementation\n")
             return 0, "Implementation done"
         
@@ -1187,18 +1282,11 @@ _(ninguno)_
         from scripts.tdd_runner import run_green_phase, build_test_cmd
         from pathlib import Path
         
-        # Pre-create directory structure
-        (self.repo / "pkg" / "test").mkdir(parents=True, exist_ok=True)
-        (self.repo / "pkg" / "src").mkdir(parents=True, exist_ok=True)
-        (self.repo / "pkg" / "test" / ".gitkeep").write_text("")
-        (self.repo / "pkg" / "src" / ".gitkeep").write_text("")
-        self._run(["git", "add", "."])
-        self._run(["git", "commit", "-m", "create pkg structure"])
-        
         red_test_content = "// RED test content\n"
         
-        # Create RED commit with test and support file
+        # Create RED commit with test and support file (in new dir)
         test_file = self.repo / "pkg" / "test" / "x.test.ts"
+        test_file.parent.mkdir(parents=True, exist_ok=True)
         test_file.write_text(red_test_content)
         support_file = self.repo / "pkg" / "vitest.config.ts"
         support_file.write_text("// config\n")
@@ -1237,6 +1325,7 @@ _(ninguno)_
             test_file = self.repo / "pkg" / "test" / "x.test.ts"
             test_file.write_text("// GREEN weakened test\n")
             impl_file = self.repo / "pkg" / "src" / "index.ts"
+            impl_file.parent.mkdir(parents=True, exist_ok=True)
             impl_file.write_text("// implementation\n")
             return 0, "Implementation done"
         
