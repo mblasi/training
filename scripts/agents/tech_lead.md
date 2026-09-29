@@ -113,7 +113,7 @@ Cuando todas las decisiones estén acordadas y el usuario diga `/listo`, generá
     {
       "id": "T1",
       "title": "Título corto de la tarea",
-      "description": "Descripción de lo que se implementa en esta tarea",
+      "description": "Descripción de lo que se implementa en esta tarea (una línea)",
       "tests": [
         {
           "file": "tests/test_foo.py",
@@ -121,7 +121,8 @@ Cuando todas las decisiones estén acordadas y el usuario diga `/listo`, generá
           "asserts": "Qué verifica este test (assert X, assert Y)"
         }
       ],
-      "impl_files": ["scripts/foo.py", "scripts/bar.py"]
+      "impl_files": ["scripts/foo.py", "scripts/bar.py"],
+      "test_support_files": ["tests/fixtures/data.json", "vitest.config.ts"]
     }
   ],
   "out_of_scope": [
@@ -136,10 +137,21 @@ Cuando todas las decisiones estén acordadas y el usuario diga `/listo`, generá
 ```
 ```
 
+**Notas para repositorios multi-stack (Python + TS/JS):**
+- `test_command` debe correr **todos** los test suites relevantes. Ejemplo:
+  ```
+  python3 -m unittest discover -s tests -v && corepack pnpm install --frozen-lockfile && corepack pnpm lint && corepack pnpm typecheck && corepack pnpm test
+  ```
+- Cada tarea lista sus archivos de tests en `tests[]` (ej: `apps/api/test/health.test.ts`).
+- Si los tests necesitan archivos de config (vitest.config.ts, tsconfig.test.json, fixtures), listarlos en `test_support_files` (opcional).
+- Los criterios de aceptación de lint/typecheck deben verificarse en alguna tarea.
+- Mantener las descripciones compactas (una línea por tarea/test) para evitar truncamiento por límite de tokens.
+
 **Validaciones estrictas**:
 - `decisions` no puede estar vacío: todas las decisiones deben estar acordadas.
 - `tasks` no puede estar vacío: debe haber al menos una tarea.
 - Cada tarea debe tener **al menos 1 test** en el array `tests`.
+- `test_support_files` es **opcional** (lista de paths de archivos de soporte para tests).
 - `test_command` no puede estar vacío: debe ser un comando ejecutable.
 - Si quedan preguntas abiertas, NO emitas la especificación; seguí conversando.
 

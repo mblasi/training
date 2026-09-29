@@ -171,6 +171,10 @@ def validate_impl_spec(spec: dict[str, Any]) -> tuple[bool, str]:
             if key not in task:
                 return False, f"Task {i} missing '{key}'"
         
+        # test_support_files is optional
+        if "test_support_files" in task and not isinstance(task.get("test_support_files"), list):
+            return False, f"Task {i} 'test_support_files' must be a list if provided"
+        
         if not isinstance(task["tests"], list) or len(task["tests"]) == 0:
             return False, f"Task {i} has no tests (cada tarea debe tener al menos 1 test)"
         
@@ -255,6 +259,11 @@ def render_spec_markdown(spec: dict[str, Any], issue: dict[str, Any]) -> str:
         for test in task["tests"]:
             lines.append(f"- `{test['file']}::{test['name']}`: {test['asserts']}")
         lines.append("")
+        if task.get("test_support_files"):
+            lines.append("**Archivos de soporte de tests:**")
+            for support_file in task["test_support_files"]:
+                lines.append(f"- `{support_file}`")
+            lines.append("")
         lines.append("**Archivos de implementación:**")
         for impl_file in task["impl_files"]:
             lines.append(f"- `{impl_file}`")
@@ -364,6 +373,16 @@ def parse_spec_markdown(md: str) -> tuple[dict[str, Any], dict[str, Any], dict[s
                 "asserts": test_match.group(3)
             })
         
+        # Extract test_support_files
+        test_support_files = []
+        support_pattern = r"\*\*Archivos de soporte de tests:\*\*\s*\n(.*?)\n\n"
+        support_match = re.search(support_pattern, body, re.DOTALL)
+        if support_match:
+            for line in support_match.group(1).split("\n"):
+                if line.strip().startswith("- `"):
+                    file_path = line.strip()[3:-1]  # Remove '- `' and '`'
+                    test_support_files.append(file_path)
+        
         # Extract impl_files
         impl_files = []
         impl_pattern = r"\*\*Archivos de implementación:\*\*\s*\n(.*?)\n\n"
@@ -378,13 +397,17 @@ def parse_spec_markdown(md: str) -> tuple[dict[str, Any], dict[str, Any], dict[s
         desc_match = re.match(r"(.*?)\n\n\*\*Tests:\*\*", body, re.DOTALL)
         description = desc_match.group(1).strip() if desc_match else ""
         
-        spec["tasks"].append({
+        task_dict = {
             "id": task_id,
             "title": title,
             "description": description,
             "tests": tests,
             "impl_files": impl_files
-        })
+        }
+        if test_support_files:
+            task_dict["test_support_files"] = test_support_files
+        
+        spec["tasks"].append(task_dict)
         
         # Extract progress checkboxes
         red_checked = re.search(r"- \[x\] RED:", body) is not None
@@ -470,6 +493,7 @@ def run_design_phase(
         spec_validator=validate_impl_spec,
         existing_messages=existing_messages,
         session_id=session_id,
+        issue_num=issue['number'],
         input_fn=input_fn,
         print_fn=print_fn
     )
@@ -612,11 +636,19 @@ Ver especificación completa en `docs/specs/issue-{issue_num}.md` (rama `{branch
                 print_fn("Cancelado.")
                 continue
             
-            # Note: In real usage, caller must provide continue_fn that handles
-            # client, sandbox, messages, session_id
-            # For simplicity, we expect continue_fn to handle the full continuation
-            # This is primarily for testing purposes
-            print_fn("Función de continuación no implementada completamente en modo testeable.")
+            # Call continue_fn which should return (new_spec, messages, session_id)
+            # If continuation fails or is cancelled, it returns (None, messages, session_id)
+            try:
+                new_spec, new_messages, new_session_id = continue_fn(user_msg)
+                if new_spec:
+                    # Update spec to the new one
+                    spec = new_spec
+                    print_fn("\nEspecificación actualizada. Mostrando preview...\n")
+                else:
+                    print_fn("\nContinuación cancelada o sin resultado. Manteniendo spec anterior.\n")
+            except Exception as e:
+                print_fn(f"\nError durante continuación: {e}")
+                print_fn("Manteniendo spec anterior.\n")
         
         elif choice == "x":
             # Save as draft

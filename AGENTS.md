@@ -51,8 +51,8 @@ Este comando ejecuta el flujo completo: **diseño → aprobación → implementa
 - **Preview y aprobación**: se muestra la spec renderizada y se ofrecen opciones:
   - **[a]probar**: guarda la spec en `docs/specs/issue-N.md`, la commitea, y publica un comentario en el issue. Después arranca automáticamente la fase de implementación TDD.
   - **[e]ditar**: edita la spec en `$EDITOR` y re-valida
-  - **[s]eguir**: continúa conversando con el agente para ajustar el diseño
-  - **[x] salir**: guarda como draft en `docs/specs/issue-N.md` (estado `draft`). Se puede retomar después corriendo `take <N>` de nuevo.
+  - **[s]eguir**: continúa conversando con el agente Tech Lead para ajustar el diseño. Podés hacer preguntas, pedir cambios, o refinar decisiones. Cuando el agente genere una nueva spec válida, vuelve al menú de preview con la spec actualizada.
+  - **[x] salir**: guarda como draft en `docs/specs/issue-N.md` (estado `draft`). Se puede retomar después corriendo `take <N>` de nuevo. Si existe una sesión guardada para ese issue, se resume desde ahí.
 
 **Fase 2: Implementación TDD**
 
@@ -107,6 +107,8 @@ Ejecuta solo la fase de implementación TDD (la spec debe estar en estado `appro
 
 - `BACKLOG_LLM_BASE_URL`: URL de la API de LLM (default: `https://inference-api.nousresearch.com/v1`)
 - `BACKLOG_LLM_MODEL`: Modelo a usar (default: `anthropic/claude-sonnet-4.6`)
+- `BACKLOG_LLM_MAX_TOKENS`: Máximo de tokens de salida (default: `16000`)
+- `BACKLOG_LLM_TIMEOUT`: Timeout HTTP en segundos (default: `300`)
 - `NOUS_API_KEY`: API key (se lee de env o `~/.config/model-keys.env`)
 
 **Para el agente de código (fase TDD):**
@@ -140,11 +142,16 @@ test_command: python3 -m unittest discover -s tests -v
 - Tabla de decisiones de diseño
 - Archivos afectados
 - Tareas con checkboxes de progreso:
-  - `[ ] RED: tests escritos y fallan`
-  - `[ ] GREEN: tests pasan`
-  - `[ ] REFACTOR: código limpio`
+  - Cada tarea lista sus tests (en `tests[]`) y archivos de implementación
+  - Opcionalmente, `test_support_files` para archivos de config o fixtures que los tests necesitan (ej: `vitest.config.ts`, `tsconfig.test.json`)
+  - Checkboxes: `[ ] RED: tests escritos y fallan`, `[ ] GREEN: tests pasan`, `[ ] REFACTOR: código limpio`
 - Fuera de alcance
 - Riesgos
+
+**Nota sobre `test_command`**: si el comando usa operadores de shell (`&&`, `||`, `|`, `;`, `>`, `<`, `$()`, backticks), se ejecuta con `sh -c`. Esto permite comandos como:
+```
+python3 -m unittest discover -s tests -v && corepack pnpm test
+```
 
 Las specs se commitean en la rama del issue y se revisan en el PR.
 
