@@ -4,11 +4,11 @@
 
 ## 🚧 En curso (WIP)
 
-- [ ] [#9](https://github.com/mblasi/training/issues/9) Monorepo pnpm: apps/api, apps/admin, apps/mobile, packages/shared + CI · chore · @mblasi
+_Nada por ahora._
 
 ## 👀 En revisión
 
-_Nada por ahora._
+- [ ] [#9](https://github.com/mblasi/training/issues/9) Monorepo pnpm: apps/api, apps/admin, apps/mobile, packages/shared + CI · chore · @mblasi
 
 ## 📋 Pendiente
 
