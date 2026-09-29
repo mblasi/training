@@ -14,7 +14,7 @@ Monorepo pnpm con apps/api (Fastify), apps/admin (React+Vite), apps/mobile (Expo
 
 | ID | Topic | Opciones | Elegida | Rationale |
 |----|-------|----------|---------|-----------|
-| D1 | Schema compartido | HealthStatus {status,version,timestamp}, objeto ad-hoc por app | HealthStatus {status:'ok', version, timestamp} en @trainia/shared, producido por GET /health y consumido por admin y mobile | Tipo único validado con Zod compartido entre los tres workspaces |
+| D1 | Schema compartido | HealthStatus {status, version, timestamp}, objeto ad-hoc por app | HealthStatus {status:'ok', version, timestamp} en @trainia/shared, producido por GET /health y consumido por admin y mobile | Tipo único validado con Zod compartido entre los tres workspaces |
 | D2 | Framework de tests JS/TS | Vitest, Jest, node:test | Vitest en todos los workspaces (env node en api/shared/mobile, jsdom en admin) | Consistencia, soporte nativo de ESM, configuración mínima |
 | D3 | CI Node | job paralelo, step extra en job Python, workflow separado | Job 'node' paralelo al job Python existente sin tocar el job test actual | Aislamiento: fallo Node no rompe reporte Python y viceversa |
 | D4 | Versión Node y pnpm | Node 20+pnpm10, Node 24+corepack+pnpm fijado | Node 24 LTS: .nvmrc=24, engines>=24 (solo declarativo, sin engine-strict), setup-node@v4 con node-version=24, pnpm vía corepack con packageManager pnpm@12.8.1 en package.json raíz | LTS actual; engines>=24 es informativo; corepack evita instalar pnpm por separado en CI |
@@ -24,6 +24,7 @@ Monorepo pnpm con apps/api (Fastify), apps/admin (React+Vite), apps/mobile (Expo
 | DN1 | Versión exacta de pnpm | pnpm@10.x, pnpm@12.8.1 | pnpm@12.8.1 | Latest estable real en npm al momento de diseño |
 | DN2 | Placeholder de admin y mobile | componente estático sin router, con router completo | admin: página única sin router; mobile: expo-router con app/index.tsx; ambas muestran 'Trainia' y usan HealthStatus de shared | Mínimo viable para verificar integración con shared sin complejidad de routing |
 | DN3 | Test de GET /health en api | supertest, app.inject() de Fastify, fetch directo | app.inject() de Fastify sin abrir puerto real | Sin dependencia de red, más rápido, idiomático en Fastify |
+| D8 | La spec lista `packages/shared/package.json` y `packages/shared/tsconfig.json` en dos lugares contradictorios: | Archivos que figuran a la vez en test_support_files e impl_files se permiten en RED con contenido mínimo (solo lo necesario para que el runner descubra y ejecute los tests: nombre, type, scripts test, devDeps de test, tsconfig base); en GREEN se completan (dependencias de producción como zod, exports, etc.). test_support_files tiene prioridad sobre la lista de prohibidos. | Archivos que figuran a la vez en test_support_files e impl_files se permiten en RED con contenido mínimo (solo lo necesario para que el runner descubra y ejecute los tests: nombre, type, scripts test, devDeps de test, tsconfig base); en GREEN se completan (dependencias de producción como zod, exports, etc.). test_support_files tiene prioridad sobre la lista de prohibidos. | Decisión tomada durante implementación |
 
 ## Archivos afectados
 
