@@ -662,18 +662,6 @@ def cmd_take(args):
             print("Diseño cancelado o sin resultado.")
             return
         
-        # Define continue function for [s]eguir
-        def continue_design(user_message: str):
-            """Continue the design conversation with a new user message."""
-            # Append user message to existing messages
-            updated_messages = messages + [{"role": "user", "content": user_message}]
-            # Continue interview with existing messages
-            return take_agent.run_design_phase(
-                client, sandbox, repo_root, full_issue,
-                existing_messages=updated_messages,
-                session_id=session_id
-            )
-        
         # Define continue_fn for "[s]eguir" option
         def continue_interview(user_msg: str):
             """Continue the design conversation with the Tech Lead."""
