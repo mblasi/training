@@ -1,6 +1,6 @@
 ---
 issue: 9
-status: implementing
+status: done
 test_command: python3 -m unittest discover -s tests -v && corepack pnpm install && corepack pnpm lint && corepack pnpm typecheck && corepack pnpm test
 ---
 
