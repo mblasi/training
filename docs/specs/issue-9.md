@@ -85,7 +85,7 @@ Crear package.json raíz, pnpm-workspace.yaml, pnpm-lock.yaml, .nvmrc, tsconfig.
 - `.prettierrc.json`
 
 **Progreso:**
-- [ ] RED: tests escritos y fallan
+- [x] RED: tests escritos y fallan
 - [ ] GREEN: tests pasan
 - [ ] REFACTOR: código limpio
 
