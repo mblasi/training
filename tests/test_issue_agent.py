@@ -3,11 +3,12 @@
 Unit tests for issue_agent module
 """
 import json
+import os
 import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 # Import issue_agent module
 repo_root = Path(__file__).parent.parent
@@ -329,16 +330,18 @@ class TestBoundedToolLoop(unittest.TestCase):
             readme = Path(tmpdir) / "README.md"
             readme.write_text("# Test repo")
             
-            spec, messages, session_id = issue_agent.run_interview(
-                mock_client,
-                sandbox,
-                tmpdir,
-                "",
-                existing_messages=existing_messages,
-                session_id="test_bounded",
-                input_fn=mock_input,
-                print_fn=mock_print
-            )
+            # Set cap to 8 to match test expectations
+            with patch.dict(os.environ, {"BACKLOG_LLM_MAX_TOOL_ROUNDS": "8"}):
+                spec, messages, session_id = issue_agent.run_interview(
+                    mock_client,
+                    sandbox,
+                    tmpdir,
+                    "",
+                    existing_messages=existing_messages,
+                    session_id="test_bounded",
+                    input_fn=mock_input,
+                    print_fn=mock_print
+                )
             
             # Verify that the loop injected the "stop using tools" message
             intervention_messages = [

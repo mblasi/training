@@ -119,6 +119,7 @@ Ejecuta solo la fase de implementación TDD (la spec debe estar en estado `appro
 - `BACKLOG_LLM_MODEL`: Modelo a usar (default: `anthropic/claude-sonnet-4.6`)
 - `BACKLOG_LLM_MAX_TOKENS`: Máximo de tokens de salida (default: `16000`)
 - `BACKLOG_LLM_TIMEOUT`: Timeout HTTP en segundos (default: `300`)
+- `BACKLOG_LLM_MAX_TOOL_ROUNDS`: Máximo de rondas consecutivas de tool calls (default: `20`). Al alcanzarlo, se responden los tool_calls pendientes con un resultado sintético y se pide al agente seguir sin herramientas.
 - `NOUS_API_KEY`: API key (se lee de env o `~/.config/model-keys.env`)
 
 **Para el agente de código (fase TDD):**
