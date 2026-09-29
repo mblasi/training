@@ -4,11 +4,11 @@
 
 ## 🚧 En curso (WIP)
 
-- [ ] ⛔ [#9](https://github.com/mblasi/training/issues/9) Monorepo pnpm: apps/api, apps/admin, apps/mobile, packages/shared + CI · chore · @mblasi
+- [ ] [#9](https://github.com/mblasi/training/issues/9) Monorepo pnpm: apps/api, apps/admin, apps/mobile, packages/shared + CI · chore · @mblasi
 
 ## 👀 En revisión
 
-- [ ] [#17](https://github.com/mblasi/training/issues/17) Harness: prompt de RED/GREEN con test_support_files y detección de corridas vacías · fix · @mblasi
+_Nada por ahora._
 
 ## 📋 Pendiente
 
@@ -22,6 +22,7 @@
 
 ## ✅ Hecho
 
+- [x] [#17](https://github.com/mblasi/training/issues/17) Harness: prompt de RED/GREEN con test_support_files y detección de corridas vacías · fix · @mblasi
 - [x] [#15](https://github.com/mblasi/training/issues/15) Harness: soporte TDD para monorepo TS/JS y fixes del take (seguir, spec truncada, retomar draft) · fix · @mblasi
 - [x] [#7](https://github.com/mblasi/training/issues/7) docs: registrar decisiones de producto en DESIGN.md · docs · @mblasi
 - [x] [#5](https://github.com/mblasi/training/issues/5) backlog take: spec de implementación acordada con el usuario + implementación TDD controlada por el harness · feat · @mblasi
