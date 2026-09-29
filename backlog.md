@@ -4,7 +4,7 @@
 
 ## 🚧 En curso (WIP)
 
-- [ ] ⛔ [#10](https://github.com/mblasi/training/issues/10) Postgres + pgvector local (Docker) + Drizzle + migraciones iniciales · feat · @mblasi
+- [ ] [#10](https://github.com/mblasi/training/issues/10) Postgres + pgvector local (Docker) + Drizzle + migraciones iniciales · feat · @mblasi
 
 ## 👀 En revisión
 
