@@ -124,7 +124,7 @@ class TestLLMConfigExportHandling(unittest.TestCase):
             
             try:
                 Path.home = mock_home
-                base_url, api_key, model = issue_agent.get_llm_config()
+                base_url, api_key, model, max_tokens, timeout = issue_agent.get_llm_config()
                 self.assertEqual(api_key, "test-key-export")
             finally:
                 Path.home = original_home
