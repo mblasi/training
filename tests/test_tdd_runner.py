@@ -834,5 +834,157 @@ class TestBuildCoderCmd(unittest.TestCase):
         self.assertFalse(any("~" in part for part in cmd), f"Tilde not expanded: {cmd}")
 
 
+class TestRedPhaseWithSupportFiles(unittest.TestCase):
+    """Test RED phase accepts test_support_files."""
+    
+    def setUp(self):
+        """Create a temporary git repo for testing."""
+        self.temp_dir = tempfile.mkdtemp(prefix="red_support_test_")
+        self.repo = Path(self.temp_dir)
+        
+        # Initialize git repo
+        self._run(["git", "init"])
+        self._run(["git", "config", "user.email", "test@test.com"])
+        self._run(["git", "config", "user.name", "Test User"])
+        
+        # Create minimal structure
+        (self.repo / "tests").mkdir()
+        (self.repo / "pkg").mkdir()
+        (self.repo / "pkg" / "test").mkdir()
+        (self.repo / "docs" / "specs").mkdir(parents=True)
+        (self.repo / ".backlog" / "runs").mkdir(parents=True)
+        
+        # Create .gitignore
+        (self.repo / ".gitignore").write_text("__pycache__/\n.backlog/\n")
+        
+        # Initial commit
+        self._run(["git", "add", "."])
+        self._run(["git", "commit", "-m", "initial commit"])
+        
+        # Create spec with test_support_files
+        self._create_spec_with_support_files()
+    
+    def tearDown(self):
+        """Clean up temporary repo."""
+        import shutil
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+    
+    def _run(self, cmd: list[str], cwd: str = None, timeout: int = None) -> subprocess.CompletedProcess:
+        """Run a command in the temp repo."""
+        return subprocess.run(
+            cmd,
+            cwd=cwd or self.repo,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False
+        )
+    
+    def _create_spec_with_support_files(self):
+        """Create a spec file with test_support_files."""
+        spec_content = """---
+issue: 1
+status: approved
+test_command: python3 -m unittest discover -s tests -v
+---
+
+# Spec
+
+## Resumen
+
+Test with support files
+
+## Decisiones de diseño
+
+| ID | Topic | Opciones | Elegida | Rationale |
+|----|-------|----------|---------|-----------|
+| D1 | Testing | pytest, unittest | unittest | Standard |
+
+## Archivos afectados
+
+- **create** `pkg/test/x.test.ts`: test file
+- **create** `pkg/vitest.config.ts`: config
+
+## Tareas
+
+### T1: Implement feature
+
+Feature with TS tests
+
+**Tests:**
+- `pkg/test/x.test.ts::test_feature`: assert x == y
+
+**Archivos de soporte de tests:**
+- `pkg/vitest.config.ts`
+
+**Archivos de implementación:**
+- `pkg/src/index.ts`
+
+**Progreso:**
+- [ ] RED: tests escritos y fallan
+- [ ] GREEN: tests pasan
+- [ ] REFACTOR: código limpio
+
+## Fuera de alcance
+
+_(ninguno)_
+
+## Riesgos
+
+_(ninguno)_
+"""
+        spec_path = self.repo / "docs" / "specs" / "issue-1.md"
+        spec_path.write_text(spec_content)
+        self._run(["git", "add", str(spec_path)])
+        self._run(["git", "commit", "-m", "docs: spec (#1)"])
+    
+    def test_red_with_support_files_accepted(self):
+        """Test RED phase accepts changes to test_support_files."""
+        from scripts.tdd_runner import run_tdd_implementation
+        
+        # Pre-create the directory structure so git doesn't see it as new
+        (self.repo / "pkg" / "test").mkdir(parents=True, exist_ok=True)
+        (self.repo / "pkg" / "src").mkdir(parents=True, exist_ok=True)
+        (self.repo / "pkg" / "test" / ".gitkeep").write_text("")
+        (self.repo / "pkg" / "src" / ".gitkeep").write_text("")
+        self._run(["git", "add", "."])
+        self._run(["git", "commit", "-m", "create pkg structure"])
+        
+        # Fake coder that creates test file + support file
+        def fake_coder(prompt: str, log_path: str) -> tuple[int, str]:
+            if "red" in log_path.lower():
+                # Create test file and support file
+                test_file = self.repo / "pkg" / "test" / "x.test.ts"
+                test_file.write_text("// test that fails\n")
+                
+                support_file = self.repo / "pkg" / "vitest.config.ts"
+                support_file.write_text("// vitest config\n")
+                
+                return 0, "Tests written"
+            return 1, "Not implemented"
+        
+        # Run RED phase only (will fail because tests won't actually run, but that's ok)
+        # We just want to verify the file validation passes
+        outputs = []
+        def mock_print(msg: str) -> None:
+            outputs.append(msg)
+        
+        # This will fail at test execution, but should not fail at file validation
+        result = run_tdd_implementation(
+            repo_root=str(self.repo),
+            issue_num=1,
+            coder=fake_coder,
+            run_cmd=self._run,
+            input_fn=lambda p: "abortar",
+            print_fn=mock_print
+        )
+        
+        # Check that the error is NOT about modifying non-test files
+        output_text = " ".join(outputs)
+        self.assertNotIn("archivos de producción en RED", output_text)
+        # Should fail at test execution or user abort, not at validation
+        self.assertFalse(result)
+
+
 if __name__ == "__main__":
     unittest.main()

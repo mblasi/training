@@ -50,16 +50,66 @@ def build_coder_cmd(prompt: str, env: dict[str, str] | None = None) -> list[str]
     return cmd_parts
 
 
+def build_test_cmd(test_command: str) -> list[str]:
+    """
+    Build test command for execution.
+    
+    Returns ["sh", "-c", test_command] if the command contains shell operators
+    (&&, ||, |, ;, >, <, $(), or backticks), otherwise shlex.split(test_command).
+    
+    Args:
+        test_command: The test command string
+    
+    Returns:
+        List of command arguments for subprocess.run
+    """
+    shell_operators = ["&&", "||", "|", ";", ">", "<", "$(", "`"]
+    
+    if any(op in test_command for op in shell_operators):
+        return ["sh", "-c", test_command]
+    else:
+        return shlex.split(test_command)
+
+
 def is_test_file(path: str) -> bool:
-    """Check if a path is a test file."""
+    """
+    Check if a path is a test file.
+    
+    Matches Python and JS/TS test files:
+    - Python: starts with tests/, contains /test_, or ends with _test.py/.test.py/.spec.py
+    - JS/TS: ends with .test.{ts,tsx,js,jsx,mjs,cjs} or .spec.{ts,tsx,js,jsx,mjs,cjs}
+    - Any path containing a segment "test", "tests" or "__tests__"
+      (e.g. apps/api/test/health.test.ts, packages/shared/__tests__/x.ts)
+    
+    Does NOT match things like "src/contest.ts" or "latest/foo.ts"
+    (must be a full path segment).
+    """
     path_lower = path.lower()
-    return (
-        path.startswith("tests/") or
+    
+    # Python patterns
+    if (path.startswith("tests/") or
         "/test_" in path or
         path_lower.endswith("_test.py") or
         path_lower.endswith(".test.py") or
-        path_lower.endswith(".spec.py")
-    )
+        path_lower.endswith(".spec.py")):
+        return True
+    
+    # JS/TS test file extensions
+    js_ts_test_exts = [
+        ".test.ts", ".test.tsx", ".test.js", ".test.jsx", ".test.mjs", ".test.cjs",
+        ".spec.ts", ".spec.tsx", ".spec.js", ".spec.jsx", ".spec.mjs", ".spec.cjs"
+    ]
+    if any(path_lower.endswith(ext) for ext in js_ts_test_exts):
+        return True
+    
+    # Check if path contains a full segment "test", "tests", or "__tests__"
+    # Split by / and check each segment
+    segments = path.split("/")
+    test_segments = {"test", "tests", "__tests__"}
+    if any(seg.lower() in test_segments for seg in segments):
+        return True
+    
+    return False
 
 
 def get_changed_files(repo_root: str, run_cmd: Callable) -> list[str]:
@@ -287,7 +337,7 @@ def run_tdd_implementation(
         print_fn("Error: test_command vacío en spec")
         return False
     
-    test_cmd = shlex.split(test_command)
+    test_cmd = build_test_cmd(test_command)
     
     # Create logs directory
     logs_dir = Path(repo_root) / ".backlog" / "runs" / f"issue-{issue_num}"
@@ -440,10 +490,14 @@ def run_red_phase(
                 break
         
         # Check if non-test files were modified
+        # Allowed in RED: test files (by pattern or listed in tests[].file) and test_support_files
         test_files_in_task = [t["file"] for t in task["tests"]]
+        test_support_files = task.get("test_support_files", [])
+        allowed_in_red = set(test_files_in_task + test_support_files)
+        
         non_test_changes = [
             f for f in changed
-            if not is_test_file(f) and f not in test_files_in_task
+            if not is_test_file(f) and f not in allowed_in_red
         ]
         
         if non_test_changes:
