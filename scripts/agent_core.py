@@ -18,19 +18,22 @@ from urllib.error import HTTPError
 class LLMClient:
     """OpenAI-compatible LLM client using urllib."""
     
-    def __init__(self, base_url: str, api_key: str, model: str):
+    def __init__(self, base_url: str, api_key: str, model: str, max_tokens: int = 16000, timeout: int = 300):
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self.model = model
+        self.max_tokens = max_tokens
+        self.timeout = timeout
     
     def chat(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None) -> dict[str, Any]:
         """
         Send chat completion request with optional tool calling.
-        Returns: {"role": "assistant", "content": str, "tool_calls": [...]} or error dict
+        Returns: {"role": "assistant", "content": str, "tool_calls": [...], "finish_reason": str} or error dict
         """
         payload = {
             "model": self.model,
             "messages": messages,
+            "max_tokens": self.max_tokens,
         }
         
         if tools:
@@ -48,9 +51,12 @@ class LLMClient:
         )
         
         try:
-            with request.urlopen(req, timeout=60) as response:
+            with request.urlopen(req, timeout=self.timeout) as response:
                 result = json.loads(response.read().decode("utf-8"))
-                return result["choices"][0]["message"]
+                message = result["choices"][0]["message"]
+                # Add finish_reason to message
+                message["finish_reason"] = result["choices"][0].get("finish_reason", "stop")
+                return message
         except HTTPError as e:
             error_body = e.read().decode("utf-8") if e.fp else ""
             return {"error": f"HTTP {e.code}: {error_body}"}
@@ -268,13 +274,15 @@ def edit_in_editor(initial_content: str) -> str | None:
         os.unlink(temp_path)
 
 
-def get_llm_config() -> tuple[str, str, str]:
+def get_llm_config() -> tuple[str, str, str, int, int]:
     """
     Get LLM configuration from environment.
-    Returns (base_url, api_key, model).
+    Returns (base_url, api_key, model, max_tokens, timeout).
     """
     base_url = os.environ.get("BACKLOG_LLM_BASE_URL", "https://inference-api.nousresearch.com/v1")
     model = os.environ.get("BACKLOG_LLM_MODEL", "anthropic/claude-sonnet-4.6")
+    max_tokens = int(os.environ.get("BACKLOG_LLM_MAX_TOKENS", "16000"))
+    timeout = int(os.environ.get("BACKLOG_LLM_TIMEOUT", "300"))
     
     # Try NOUS_API_KEY first, fallback to loading from config
     api_key = os.environ.get("NOUS_API_KEY")
@@ -298,14 +306,15 @@ def get_llm_config() -> tuple[str, str, str]:
             "NOUS_API_KEY not found. Set it in environment or ~/.config/model-keys.env"
         )
     
-    return base_url, api_key, model
+    return base_url, api_key, model, max_tokens, timeout
 
 
-def save_session(repo_root: str, messages: list[dict[str, Any]], session_id: str | None = None) -> tuple[str, str]:
+def save_session(repo_root: str, messages: list[dict[str, Any]], session_id: str | None = None, issue_num: int | None = None) -> tuple[str, str]:
     """
     Save interview transcript to .backlog/sessions/.
     Returns (json_path, md_path).
     If session_id is provided, reuses that filename; otherwise creates new timestamped files.
+    If issue_num is provided, it's stored in metadata for resuming.
     """
     sessions_dir = Path(repo_root) / ".backlog" / "sessions"
     sessions_dir.mkdir(parents=True, exist_ok=True)
@@ -317,8 +326,15 @@ def save_session(repo_root: str, messages: list[dict[str, Any]], session_id: str
     md_path = sessions_dir / f"{session_id}.md"
     
     # Save JSON (machine-readable, for resume)
+    session_data = {
+        "messages": messages,
+        "timestamp": datetime.now().isoformat()
+    }
+    if issue_num is not None:
+        session_data["issue"] = issue_num
+    
     with open(json_path, "w", encoding="utf-8") as f:
-        json.dump({"messages": messages, "timestamp": datetime.now().isoformat()}, f, indent=2)
+        json.dump(session_data, f, indent=2)
     
     # Save markdown (human-readable)
     with open(md_path, "w", encoding="utf-8") as f:
@@ -380,6 +396,72 @@ def get_last_session(repo_root: str) -> str | None:
     return str(json_files[0])
 
 
+def find_session_for_issue(repo_root: str, issue_num: int) -> str | None:
+    """
+    Find the most recent session for a given issue number.
+    Returns session path or None if no session exists.
+    """
+    sessions_dir = Path(repo_root) / ".backlog" / "sessions"
+    if not sessions_dir.exists():
+        return None
+    
+    json_files = list(sessions_dir.glob("*.json"))
+    if not json_files:
+        return None
+    
+    # Filter sessions for this issue, sorted by most recent first
+    issue_sessions = []
+    for session_file in json_files:
+        try:
+            with open(session_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if data.get("issue") == issue_num:
+                    issue_sessions.append(session_file)
+        except Exception:
+            # Skip corrupted session files
+            continue
+    
+    if not issue_sessions:
+        return None
+    
+    # Sort by modification time, most recent first
+    issue_sessions.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+    return str(issue_sessions[0])
+
+
+def find_session_for_issue(repo_root: str, issue_num: int) -> str | None:
+    """
+    Find the most recent session file for a given issue number.
+    Returns path to session file or None if not found.
+    """
+    sessions_dir = Path(repo_root) / ".backlog" / "sessions"
+    if not sessions_dir.exists():
+        return None
+    
+    json_files = list(sessions_dir.glob("*.json"))
+    if not json_files:
+        return None
+    
+    # Filter sessions for this issue and sort by mtime (most recent first)
+    matching_sessions = []
+    for json_file in json_files:
+        try:
+            with open(json_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if data.get("issue") == issue_num:
+                    matching_sessions.append(json_file)
+        except (json.JSONDecodeError, KeyError, IOError):
+            # Skip corrupted or old-format session files
+            continue
+    
+    if not matching_sessions:
+        return None
+    
+    # Sort by mtime and return most recent
+    matching_sessions.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+    return str(matching_sessions[0])
+
+
 def run_generic_interview(
     client: LLMClient,
     sandbox: ToolSandbox,
@@ -389,6 +471,7 @@ def run_generic_interview(
     spec_validator: Callable[[dict[str, Any]], tuple[bool, str]],
     existing_messages: list[dict[str, Any]] | None = None,
     session_id: str | None = None,
+    issue_num: int | None = None,
     input_fn: Callable[[str], str] = input,
     print_fn: Callable[[str], None] = print
 ) -> tuple[dict[str, Any] | None, list[dict[str, Any]], str]:
@@ -464,7 +547,7 @@ def run_generic_interview(
                     print_fn("\nEntrevista cancelada.")
                     return None, messages, session_id
                 # Save messages before retry
-                save_session(repo_root, messages, session_id)
+                save_session(repo_root, messages, session_id, issue_num)
         
         messages.append(response)
         
@@ -481,7 +564,7 @@ def run_generic_interview(
                 })
                 consecutive_tool_calls = 0
                 # Save transcript
-                save_session(repo_root, messages, session_id)
+                save_session(repo_root, messages, session_id, issue_num)
                 continue
             
             for tool_call in response["tool_calls"]:
@@ -510,7 +593,7 @@ def run_generic_interview(
                 })
             
             # Save transcript after tool calls
-            save_session(repo_root, messages, session_id)
+            save_session(repo_root, messages, session_id, issue_num)
             # Continue loop to let agent process tool results
             continue
         
@@ -530,7 +613,7 @@ def run_generic_interview(
                 valid, error = spec_validator(spec)
                 if valid:
                     # Save final transcript
-                    save_session(repo_root, messages, session_id)
+                    save_session(repo_root, messages, session_id, issue_num)
                     return spec, messages, session_id
                 else:
                     spec_fix_attempts += 1
@@ -538,28 +621,42 @@ def run_generic_interview(
                         print_fn(f"Especificación inválida: {error}")
                         print_fn(f"Solicitando corrección (intento {spec_fix_attempts}/{max_spec_fix_attempts})...\n")
                         messages.append({"role": "user", "content": f"La especificación tiene un error: {error}. Por favor corregila."})
-                        save_session(repo_root, messages, session_id)
+                        save_session(repo_root, messages, session_id, issue_num)
                         continue
                     else:
                         print_fn(f"Especificación inválida después de {max_spec_fix_attempts} intentos: {error}")
                         print_fn("Continúa la entrevista para ajustar.\n")
                         spec_fix_attempts = 0
             else:
-                print_fn("No se pudo parsear la especificación. Continúa la entrevista.\n")
+                # Failed to parse spec
+                finish_reason = response.get("finish_reason", "stop")
+                if finish_reason == "length":
+                    # Spec was truncated due to output limit
+                    print_fn(f"\n⚠️  La especificación fue truncada por el límite de salida del modelo.")
+                    print_fn(f"Aumentá BACKLOG_LLM_MAX_TOKENS (actualmente: {os.environ.get('BACKLOG_LLM_MAX_TOKENS', '16000')}) o pedí una spec más compacta.\n")
+                    print_fn("Solicitando que el modelo re-emita la spec de forma más compacta...\n")
+                    messages.append({
+                        "role": "user",
+                        "content": "La especificación fue truncada. Por favor re-emití la especificación completa de forma MÁS COMPACTA: descripciones de una línea, rationales breves, sin detalles innecesarios."
+                    })
+                    save_session(repo_root, messages, session_id, issue_num)
+                    continue
+                else:
+                    print_fn("No se pudo parsear la especificación. Continúa la entrevista.\n")
         
         # Get user input
         try:
             user_input = input_fn("> ")
         except (EOFError, KeyboardInterrupt):
             print_fn("\nEntrevista cancelada.")
-            save_session(repo_root, messages, session_id)
+            save_session(repo_root, messages, session_id, issue_num)
             return None, messages, session_id
         
         user_input = user_input.strip()
         
         if user_input.lower() in ["/cancelar", "/cancel"]:
             print_fn("Entrevista cancelada.")
-            save_session(repo_root, messages, session_id)
+            save_session(repo_root, messages, session_id, issue_num)
             return None, messages, session_id
         
         if user_input.lower() == "/listo":
@@ -573,8 +670,8 @@ def run_generic_interview(
             continue
         
         # Save transcript after user turn
-        save_session(repo_root, messages, session_id)
+        save_session(repo_root, messages, session_id, issue_num)
     
     print_fn("Alcanzado límite de turnos.")
-    save_session(repo_root, messages, session_id)
+    save_session(repo_root, messages, session_id, issue_num)
     return None, messages, session_id
