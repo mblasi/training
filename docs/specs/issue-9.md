@@ -138,7 +138,7 @@ Crear workspace api con Fastify, ruta GET /health que retorna HealthStatus valid
 - `apps/api/tsconfig.json`
 
 **Progreso:**
-- [ ] RED: tests escritos y fallan
+- [x] RED: tests escritos y fallan
 - [ ] GREEN: tests pasan
 - [ ] REFACTOR: código limpio
 
