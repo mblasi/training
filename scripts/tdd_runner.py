@@ -19,11 +19,11 @@ sys.path.insert(0, str(Path(__file__).parent))
 from take_agent import parse_spec_markdown, set_status, mark_progress
 
 
-# Empty run detection signals
+# Empty run detection patterns (compiled regexes, anchored at line start)
 EMPTY_RUN_SIGNALS = [
-    "No projects matched the filters",
-    "No test files found",
-    "Ran 0 tests"
+    re.compile(r"^\s*No projects matched the filters", re.MULTILINE),
+    re.compile(r"^\s*No test files found", re.MULTILINE),
+    re.compile(r"^\s*Ran 0 tests\b", re.MULTILINE),
 ]
 
 
@@ -220,11 +220,18 @@ def detect_empty_run(output: str) -> str | None:
     """
     Detect if test run was empty (no tests executed).
     
-    Returns the matched signal string if empty run detected, None otherwise.
+    Strips ANSI escape sequences from output and matches against line-anchored
+    regex patterns. Returns the matched line (stripped) if empty run detected,
+    None otherwise.
     """
-    for signal in EMPTY_RUN_SIGNALS:
-        if signal in output:
-            return signal
+    # Strip ANSI escape sequences
+    ansi_escape = re.compile(r'\x1b\[[0-9;]*m')
+    clean_output = ansi_escape.sub('', output)
+    
+    for pattern in EMPTY_RUN_SIGNALS:
+        match = pattern.search(clean_output)
+        if match:
+            return match.group(0).strip()
     return None
 
 
