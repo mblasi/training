@@ -5,6 +5,68 @@ Trainia (trainia.blasi.ar): app de entrenamiento autogestionada con un equipo de
 - Diseño: [docs/DESIGN.md](docs/DESIGN.md)
 - Backlog: [backlog.md](backlog.md)
 
+## Desarrollo
+
+### Prerrequisitos
+
+- Node 24 LTS (ver `.nvmrc`)
+- Corepack habilitado: `corepack enable`
+
+### Comandos raíz
+
+Desde la raíz del monorepo:
+
+```bash
+corepack pnpm install         # instalar dependencias
+corepack pnpm lint            # lint en todos los workspaces
+corepack pnpm typecheck       # typecheck en todos los workspaces
+corepack pnpm test            # tests en todos los workspaces
+```
+
+### apps/api
+
+API backend con Fastify. Servidor de desarrollo:
+
+```bash
+corepack pnpm --filter ./apps/api dev
+```
+
+### apps/admin
+
+Panel de administración React+Vite. Servidor de desarrollo:
+
+```bash
+corepack pnpm --filter ./apps/admin dev
+```
+
+Build de producción:
+
+```bash
+corepack pnpm --filter ./apps/admin build
+```
+
+### apps/mobile
+
+App móvil con Expo. Servidor de desarrollo:
+
+```bash
+corepack pnpm --filter ./apps/mobile start
+```
+
+Servidor web:
+
+```bash
+corepack pnpm --filter ./apps/mobile web
+```
+
+Build web:
+
+```bash
+corepack pnpm --filter ./apps/mobile exec expo export --platform web --output-dir dist-web
+```
+
+**Nota**: Expo SDK 57 funciona con pnpm en modo isolated (sin `node-linker=hoisted`). El setup usa `metro.config.js` para resolver workspaces y `babel.config.cjs` con `babel-preset-expo`.
+
 ## Flujo de trabajo
 
 Este proyecto usa un workflow basado en GitHub Issues manejado por `scripts/backlog.py`.

@@ -1,0 +1,33 @@
+{
+  "name": "@trainia/mobile",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "expo-router/entry",
+  "scripts": {
+    "start": "expo start",
+    "web": "expo start --web",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@babel/runtime": "^8.0.5",
+    "@trainia/shared": "workspace:*",
+    "babel-preset-expo": "^57.0.13",
+    "expo": "^57.0.26",
+    "expo-router": "~57.0.24",
+    "react": "19.2.3",
+    "react-dom": "19.2.3",
+    "react-native": "0.86.3",
+    "react-native-web": "~0.21.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/react": "~19.2.18",
+    "eslint": "^10.0.0",
+    "eslint-config-expo": "^57.0.0",
+    "typescript": "~6.0.3",
+    "typescript-eslint": "^8.71.0",
+    "vitest": "^5.0.0"
+  }
+}
