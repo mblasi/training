@@ -59,14 +59,22 @@ Este comando ejecuta el flujo completo: **diseño → aprobación → implementa
 Si la spec fue aprobada (o ya está en estado `approved` o `implementing`), el harness ejecuta automáticamente:
 
 Para cada tarea pendiente, en orden:
-1. **RED**: invoca al agente de código (configurable con `BACKLOG_CODER_CMD` y `BACKLOG_CODER_MODEL`) con la spec y la tarea: "escribí SOLO los tests de esta tarea, no toques código de producción". Verifica:
-   - Solo se modifican archivos de test
+1. **RED**: invoca al agente de código (configurable con `BACKLOG_CODER_CMD` y `BACKLOG_CODER_MODEL`) con la spec y la tarea: "escribí SOLO los tests de esta tarea, no toques código de producción". El prompt incluye:
+   - Si la tarea tiene `test_support_files` (ej: vitest.config.ts, pytest.ini), se listan con instrucción de crearlos/ajustarlos para que los tests se ejecuten y fallen por assert/import faltante, nunca por infraestructura faltante
+   - Los archivos de `impl_files` se marcan explícitamente como prohibidos en RED
+   
+   Verifica:
+   - Solo se modifican archivos de test y test_support_files
    - Los tests **deben fallar** (si pasan, reintenta una vez y después pregunta al usuario)
+   - Si el test command no ejecuta ningún test (detecta señales como "No test files found", "Ran 0 tests", "No projects matched"), se trata como error de infraestructura: revierte, reintenta con feedback al coder sobre la corrida vacía
    - En el primer RED, muestra el output y pide confirmar que no es un error de infraestructura
    - Commit: `test: <tarea> (#N)`
-2. **GREEN**: invoca al agente: "implementá lo mínimo para que pasen los tests, sin modificar los tests". Verifica:
+2. **GREEN**: invoca al agente: "implementá lo mínimo para que pasen los tests, sin modificar los tests". El prompt incluye `test_support_files` (pueden modificarse en GREEN) e `impl_files`.
+   
+   Verifica:
    - Los tests **deben pasar** completos (sin regresiones)
    - Los archivos de test no cambiaron desde RED
+   - Una corrida vacía cuenta como intento fallido (con feedback que incluye la señal detectada)
    - Hasta 3 intentos con el output de los tests como feedback
    - Commit: `feat|fix: <tarea> (#N)` según el type del issue
 3. **REFACTOR** (opcional): invoca al agente: "refactorizá si es necesario (o respondé SIN_REFACTOR)". Si hay cambios, verifica que los tests sigan pasando; si fallan, revierte. Commit: `refactor: <tarea> (#N)`.
@@ -142,8 +150,9 @@ test_command: python3 -m unittest discover -s tests -v
 - Tabla de decisiones de diseño
 - Archivos afectados
 - Tareas con checkboxes de progreso:
-  - Cada tarea lista sus tests (en `tests[]`) y archivos de implementación
-  - Opcionalmente, `test_support_files` para archivos de config o fixtures que los tests necesitan (ej: `vitest.config.ts`, `tsconfig.test.json`)
+  - Cada tarea lista sus tests (en `tests[]`) y archivos de implementación (`impl_files`)
+  - Opcionalmente, `test_support_files` para archivos de config o fixtures que los tests necesitan (ej: `vitest.config.ts`, `tsconfig.test.json`, `pytest.ini`)
+  - Los `test_support_files` pueden crearse/modificarse en RED y GREEN, pero no en REFACTOR
   - Checkboxes: `[ ] RED: tests escritos y fallan`, `[ ] GREEN: tests pasan`, `[ ] REFACTOR: código limpio`
 - Fuera de alcance
 - Riesgos

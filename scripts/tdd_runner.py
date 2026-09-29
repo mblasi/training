@@ -19,6 +19,14 @@ sys.path.insert(0, str(Path(__file__).parent))
 from take_agent import parse_spec_markdown, set_status, mark_progress
 
 
+# Empty run detection signals
+EMPTY_RUN_SIGNALS = [
+    "No projects matched the filters",
+    "No test files found",
+    "Ran 0 tests"
+]
+
+
 def build_coder_cmd(prompt: str, env: dict[str, str] | None = None) -> list[str]:
     """
     Build coder command from environment configuration.
@@ -205,6 +213,18 @@ def detect_desvio(output: str) -> str | None:
     match = re.search(r"/DESVIO\s+(.+)", output, re.IGNORECASE)
     if match:
         return match.group(1).strip()
+    return None
+
+
+def detect_empty_run(output: str) -> str | None:
+    """
+    Detect if test run was empty (no tests executed).
+    
+    Returns the matched signal string if empty run detected, None otherwise.
+    """
+    for signal in EMPTY_RUN_SIGNALS:
+        if signal in output:
+            return signal
     return None
 
 
@@ -452,10 +472,15 @@ def run_red_phase(
     """
     task_id = task["id"]
     max_attempts = 2  # Initial + 1 retry
+    last_feedback = None
     
     for attempt in range(max_attempts):
         # Build prompt
         prompt = build_red_prompt(spec, task)
+        
+        # Append feedback from previous attempt if any
+        if last_feedback:
+            prompt += f"\n\n**Feedback del intento anterior:**\n\n{last_feedback}\n"
         
         # Call coder
         log_path = logs_dir / f"{task_id}-red-{attempt + 1}.log"
@@ -538,6 +563,28 @@ def run_red_phase(
         # Run tests (must FAIL)
         print_fn("Ejecutando tests...")
         test_result = run_cmd(test_cmd, cwd=repo_root, timeout=300)
+        
+        # Check for empty run (no tests executed)
+        combined_output = test_result.stdout + "\n" + test_result.stderr
+        empty_signal = detect_empty_run(combined_output)
+        
+        if empty_signal:
+            print_fn(f"Error: no se ejecutó ningún test: {empty_signal}")
+            print_fn("Los archivos de soporte de tests deben permitir que el runner encuentre los tests.")
+            
+            # Revert and retry with feedback
+            if changed:
+                revert_files(repo_root, changed, run_cmd)
+            
+            if attempt < max_attempts - 1:
+                print_fn("Reintentando RED con feedback...\n")
+                last_feedback = f"No se ejecutó ningún test: {empty_signal}\n\nCreá los test_support_files necesarios para que el runner encuentre los tests."
+                continue
+            else:
+                user_choice = input_fn("Continuar o abortar? (continuar/abortar): ").strip().lower()
+                if user_choice == "abortar":
+                    return False
+                break
         
         if test_result.returncode == 0:
             print_fn("Error: tests pasaron en fase RED (deberían fallar)")
@@ -687,6 +734,24 @@ def run_green_phase(
         print_fn("Ejecutando tests...")
         test_result = run_cmd(test_cmd, cwd=repo_root, timeout=300)
         
+        # Check for empty run
+        combined_output = test_result.stdout + "\n" + test_result.stderr
+        empty_signal = detect_empty_run(combined_output)
+        
+        if empty_signal:
+            print_fn(f"Error: no se ejecutó ningún test: {empty_signal}")
+            # Empty run counts as failed attempt
+            
+            if attempt < max_attempts - 1:
+                print_fn("Reintentando GREEN...\n")
+                continue
+            else:
+                user_choice = input_fn("Reintentar o abortar? (reintentar/abortar): ").strip().lower()
+                if user_choice == "abortar":
+                    return False
+                max_attempts += 1
+                continue
+        
         if test_result.returncode != 0:
             print_fn(f"Tests fallaron (intento {attempt + 1}/{max_attempts})")
             
@@ -797,8 +862,16 @@ def run_refactor_phase(
     print_fn("Ejecutando tests después de refactor...")
     test_result = run_cmd(test_cmd, cwd=repo_root, timeout=300)
     
-    if test_result.returncode != 0:
-        print_fn("Refactor rompió los tests. Revirtiendo...")
+    # Check for empty run
+    combined_output = test_result.stdout + "\n" + test_result.stderr
+    empty_signal = detect_empty_run(combined_output)
+    
+    if empty_signal or test_result.returncode != 0:
+        if empty_signal:
+            print_fn(f"Refactor causó corrida vacía: {empty_signal}. Revirtiendo...")
+        else:
+            print_fn("Refactor rompió los tests. Revirtiendo...")
+        
         revert_files(repo_root, changed, run_cmd)
         
         # Mark as done with note
@@ -857,12 +930,39 @@ def build_red_prompt(spec: dict[str, Any], task: dict[str, Any]) -> str:
         lines.append(f"- `{test['file']}::{test['name']}`: {test['asserts']}")
     
     lines.append("")
+    
+    # Add test_support_files section if present
+    test_support_files = task.get("test_support_files", [])
+    if test_support_files:
+        lines.append("## Archivos de soporte de tests")
+        lines.append("")
+        for support_file in test_support_files:
+            lines.append(f"- `{support_file}`")
+        lines.append("")
+        lines.append("Creá o ajustá estos archivos con el mínimo necesario para que los tests se EJECUTEN y fallen por un assert o import faltante del código de producción, nunca porque falta infraestructura de tests (ej: el workspace debe tener package.json, tsconfig, vitest config necesarios para que el runner descubra los tests).")
+        lines.append("")
+    
     lines.append("## REGLAS ESTRICTAS")
     lines.append("")
     lines.append("1. Escribí SOLO los tests de esta tarea")
     lines.append("2. NO toques código de producción")
-    lines.append("3. Los tests deben FALLAR (assert o NotImplementedError)")
-    lines.append("4. Si necesitás tomar una decisión no prevista, escribí una línea `/DESVIO <explicación>` y frená")
+    
+    # List impl_files explicitly as forbidden if test_support_files present
+    if test_support_files:
+        impl_files = task.get("impl_files", [])
+        if impl_files:
+            lines.append("3. Los siguientes archivos de implementación están PROHIBIDOS en RED:")
+            for impl_file in impl_files:
+                lines.append(f"   - `{impl_file}`")
+            lines.append("4. Los tests deben FALLAR (assert o NotImplementedError)")
+            lines.append("5. Si necesitás tomar una decisión no prevista, escribí una línea `/DESVIO <explicación>` y frená")
+        else:
+            lines.append("3. Los tests deben FALLAR (assert o NotImplementedError)")
+            lines.append("4. Si necesitás tomar una decisión no prevista, escribí una línea `/DESVIO <explicación>` y frená")
+    else:
+        lines.append("3. Los tests deben FALLAR (assert o NotImplementedError)")
+        lines.append("4. Si necesitás tomar una decisión no prevista, escribí una línea `/DESVIO <explicación>` y frená")
+    
     lines.append("")
     
     return "\n".join(lines)
@@ -891,6 +991,16 @@ def build_green_prompt(spec: dict[str, Any], task: dict[str, Any], attempt: int)
     lines.append("")
     lines.append(task['description'])
     lines.append("")
+    
+    # Include test_support_files if present (may be modified in GREEN)
+    test_support_files = task.get("test_support_files", [])
+    if test_support_files:
+        lines.append("## Archivos de soporte de tests (pueden modificarse si es necesario)")
+        lines.append("")
+        for support_file in test_support_files:
+            lines.append(f"- `{support_file}`")
+        lines.append("")
+    
     lines.append("## Archivos de implementación")
     lines.append("")
     
