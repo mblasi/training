@@ -87,7 +87,7 @@ Crear package.json raíz, pnpm-workspace.yaml, pnpm-lock.yaml, .nvmrc, tsconfig.
 **Progreso:**
 - [x] RED: tests escritos y fallan
 - [x] GREEN: tests pasan
-- [ ] REFACTOR: código limpio
+- [x] REFACTOR: código limpio
 
 ### T2: packages/shared: HealthStatus Zod schema con tests
 
