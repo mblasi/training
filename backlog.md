@@ -4,6 +4,7 @@
 
 ## 🚧 En curso (WIP)
 
+- [ ] [#21](https://github.com/mblasi/training/issues/21) Harness: lockfiles permitidos en RED y /DESVIO sin consumir intento · fix · @mblasi
 - [ ] ⛔ [#9](https://github.com/mblasi/training/issues/9) Monorepo pnpm: apps/api, apps/admin, apps/mobile, packages/shared + CI · chore · @mblasi
 
 ## 👀 En revisión
@@ -14,7 +15,6 @@ _Nada por ahora._
 
 ### Fase 0 - Fundaciones
 
-- [ ] [#21](https://github.com/mblasi/training/issues/21) Harness: lockfiles permitidos en RED y /DESVIO sin consumir intento · fix · @mblasi
 - [ ] [#14](https://github.com/mblasi/training/issues/14) Stores: cuentas de desarrollador, EAS y build interno de la app · infra
 - [ ] [#13](https://github.com/mblasi/training/issues/13) Infra: proyecto GCP dedicado, Cloud Run + Cloud SQL staging y dominios trainia.blasi.ar · infra
 - [ ] [#12](https://github.com/mblasi/training/issues/12) Capa llm/ multi-proveedor (Nous Portal + Gemini) con rutas por agente y registro de llamadas · feat
