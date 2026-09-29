@@ -186,7 +186,7 @@ Crear workspace mobile con Expo y expo-router, pantalla app/index.tsx que usa He
 
 **Progreso:**
 - [x] RED: tests escritos y fallan
-- [ ] GREEN: tests pasan
+- [x] GREEN: tests pasan
 - [ ] REFACTOR: código limpio
 
 ### T6: CI job Node y README
