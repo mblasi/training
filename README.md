@@ -5,6 +5,35 @@ Trainia (trainia.blasi.ar): app de entrenamiento autogestionada con un equipo de
 - Diseño: [docs/DESIGN.md](docs/DESIGN.md)
 - Backlog: [backlog.md](backlog.md)
 
+## Desarrollo
+
+### apps/api
+
+API backend con Fastify. Servidor de desarrollo:
+
+```bash
+cd apps/api
+pnpm dev
+```
+
+### apps/admin
+
+Panel de administración React+Vite. Servidor de desarrollo:
+
+```bash
+cd apps/admin
+pnpm dev
+```
+
+### apps/mobile
+
+App móvil con Expo. Servidor de desarrollo:
+
+```bash
+cd apps/mobile
+pnpm start
+```
+
 ## Flujo de trabajo
 
 Este proyecto usa un workflow basado en GitHub Issues manejado por `scripts/backlog.py`.
