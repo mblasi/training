@@ -64,7 +64,7 @@ Para cada tarea pendiente, en orden:
    - Los archivos de `impl_files` se marcan explícitamente como prohibidos en RED
    
    Verifica:
-   - Solo se modifican archivos de test y test_support_files
+   - Solo se modifican archivos de test, test_support_files, y **dependency infra files** (lockfiles como `pnpm-lock.yaml`, `package-lock.json`, `yarn.lock`, `poetry.lock`, `uv.lock`, `pnpm-workspace.yaml`, y archivos `requirements*.txt`)
    - Los tests **deben fallar** (si pasan, reintenta una vez y después pregunta al usuario)
    - Si el test command no ejecuta ningún test (detecta señales como "No test files found", "Ran 0 tests", "No projects matched"), se trata como error de infraestructura: revierte, reintenta con feedback al coder sobre la corrida vacía
    - En el primer RED, muestra el output y pide confirmar que no es un error de infraestructura
@@ -87,7 +87,9 @@ Si el agente de código necesita tomar una decisión no prevista en la spec, deb
 - Muestra la explicación al usuario y pide una decisión
 - Agrega la decisión a la spec como nueva entrada (`D2`, `D3`, ...)
 - Commitea: `docs: decisión durante implementación (#N)`
-- Reintenta la fase
+- Reintenta la fase **sin consumir un intento**: un `/DESVIO` resuelto no cuenta como un intento fallido, el agente recibe el mismo número de intentos después de cada desvío
+- El prompt de reintento incluye explícitamente la decisión tomada: "Decisión tomada para tu /DESVIO: <texto>"
+- **Tope de 3 desvíos por fase**: si se alcanzan 3 `/DESVIO` en RED o GREEN, la fase se detiene con un mensaje claro y retorna False (no se puede seguir con tantas decisiones adicionales)
 
 **Al terminar:**
 
