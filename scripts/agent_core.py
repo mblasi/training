@@ -15,6 +15,10 @@ from urllib import request
 from urllib.error import HTTPError
 
 
+# Synthetic tool result content for capped/missing tool calls
+SYNTHETIC_TOOL_RESULT = "Tool no ejecutada: límite de herramientas alcanzado. Continuá la entrevista con el contexto que ya tenés."
+
+
 class LLMClient:
     """OpenAI-compatible LLM client using urllib."""
     
@@ -233,6 +237,58 @@ class ToolSandbox:
             return f"Error: {e}"
         except Exception as e:
             return f"Error executing {name}: {e}"
+
+
+def repair_tool_pairs(messages: list[dict]) -> list[dict]:
+    """
+    Repair tool_calls/tool_result pairing invariant.
+    
+    Returns a NEW list (does not mutate input). For every assistant message
+    with non-empty tool_calls, ensures that the messages immediately following
+    it are tool messages with matching IDs. For missing IDs, inserts synthetic
+    tool results with a "Tool no ejecutada" message.
+    
+    Idempotent: repair(repair(x)) == repair(x). Valid histories are unchanged.
+    """
+    result = []
+    i = 0
+    
+    while i < len(messages):
+        msg = messages[i]
+        result.append(msg)
+        
+        # Check if this is an assistant message with tool_calls
+        if msg.get("role") == "assistant" and msg.get("tool_calls"):
+            tool_call_ids = [tc["id"] for tc in msg["tool_calls"]]
+            i += 1
+            
+            # Collect existing contiguous tool messages
+            existing_tool_results = []
+            while i < len(messages) and messages[i].get("role") == "tool":
+                existing_tool_results.append(messages[i])
+                i += 1
+            
+            # Add existing tool results to result
+            result.extend(existing_tool_results)
+            
+            # Find missing tool_call_ids
+            existing_ids = {tr["tool_call_id"] for tr in existing_tool_results}
+            missing_ids = [tid for tid in tool_call_ids if tid not in existing_ids]
+            
+            # Insert synthetic results for missing IDs
+            for missing_id in missing_ids:
+                result.append({
+                    "role": "tool",
+                    "tool_call_id": missing_id,
+                    "content": SYNTHETIC_TOOL_RESULT
+                })
+            
+            # Don't increment i, we already advanced past tool messages
+            continue
+        
+        i += 1
+    
+    return result
 
 
 def parse_final_spec(text: str) -> dict[str, Any] | None:
@@ -460,7 +516,8 @@ def run_generic_interview(
     Returns (spec, messages, session_id).
     """
     if existing_messages:
-        messages = existing_messages
+        # Repair any corrupted tool pairs from previous sessions
+        messages = repair_tool_pairs(existing_messages)
         # Show the last assistant message to remind the user where we left off
         for msg in reversed(messages):
             if msg.get("role") == "assistant" and msg.get("content"):
@@ -486,9 +543,16 @@ def run_generic_interview(
     sessions_dir.mkdir(parents=True, exist_ok=True)
     print_fn(f"Sesión: {sessions_dir / session_id}.json\n")
     
+    # Read configurable tool call limit
+    try:
+        max_consecutive_tool_calls = int(os.environ.get("BACKLOG_LLM_MAX_TOOL_ROUNDS", "20"))
+        if max_consecutive_tool_calls <= 0:
+            max_consecutive_tool_calls = 20
+    except (ValueError, TypeError):
+        max_consecutive_tool_calls = 20
+    
     # Interview loop
     max_turns = 30
-    max_consecutive_tool_calls = 8
     consecutive_tool_calls = 0
     spec_fix_attempts = 0
     max_spec_fix_attempts = 2
@@ -505,6 +569,8 @@ def run_generic_interview(
             response = None
             while response is None:
                 try:
+                    # Repair tool pairs before sending to API
+                    messages = repair_tool_pairs(messages)
                     response = client.chat(messages, tools=sandbox.get_tool_definitions())
                     
                     if "error" in response:
@@ -538,6 +604,16 @@ def run_generic_interview(
                 # Bounded tool-call loop
                 if consecutive_tool_calls > max_consecutive_tool_calls:
                     print_fn(f"\n[Límite de llamadas consecutivas a herramientas alcanzado. Solicitando al agente que continúe sin herramientas.]\n")
+                    
+                    # Append synthetic tool results for all tool_calls in this response
+                    for tool_call in response["tool_calls"]:
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": tool_call["id"],
+                            "content": SYNTHETIC_TOOL_RESULT
+                        })
+                    
+                    # Now append the user warning
                     messages.append({
                         "role": "user",
                         "content": "Has usado muchas herramientas. Por favor continúa con la entrevista sin usar más herramientas por ahora."
