@@ -1280,6 +1280,7 @@ class TestTakeWithDraftSpec(unittest.TestCase):
         # Create minimal structure
         (self.repo / "docs" / "specs").mkdir(parents=True)
         (self.repo / ".backlog" / "sessions").mkdir(parents=True)
+        (self.repo / "scripts").mkdir(parents=True)
     
     def tearDown(self):
         """Clean up temporary directory."""
@@ -1287,156 +1288,233 @@ class TestTakeWithDraftSpec(unittest.TestCase):
         shutil.rmtree(self.temp_dir, ignore_errors=True)
     
     def test_take_with_draft_and_session_resumes(self):
-        """Test that take with draft spec and session file resumes from that session."""
-        from unittest.mock import Mock, patch, MagicMock
-        import scripts.backlog as backlog_module
-        import scripts.take_agent as take_agent_module
-        import scripts.agent_core as agent_core_module
+        """Test that cmd_take with draft spec and session file resumes design phase with existing messages."""
+        from unittest.mock import MagicMock, patch
+        import scripts.backlog as backlog
         
         issue_num = 42
+        session_id = "20260929_120000"
         
-        # Create draft spec
+        # Import take_agent
+        import sys
+        sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
+        import take_agent
+        
+        # Create draft spec using render_spec_markdown
+        spec_dict = {
+            "summary": "Draft spec for testing",
+            "decisions": [{"id": "D1", "topic": "Test", "options": ["A", "B"], "chosen": "A", "rationale": "Simple"}],
+            "files": [],
+            "test_command": "pytest",
+            "tasks": [],
+            "out_of_scope": [],
+            "risks": []
+        }
+        
+        issue_dict = {"number": issue_num, "title": "Test Issue"}
+        spec_markdown = take_agent.render_spec_markdown(spec_dict, issue_dict)
         spec_path = self.repo / "docs" / "specs" / f"issue-{issue_num}.md"
-        spec_path.write_text("""---
-issue: 42
-status: draft
-test_command: pytest
----
-
-# Draft spec
-
-## Resumen
-
-Draft
-
-## Decisiones de diseño
-
-| ID | Topic | Opciones | Elegida | Rationale |
-|----|-------|----------|---------|-----------|
-| D1 | Test | A, B | A | Simple |
-
-## Archivos afectados
-
-## Tareas
-
-## Fuera de alcance
-
-## Riesgos
-""")
+        spec_path.write_text(spec_markdown)
         
         # Create session file for issue 42
-        session_id = "20260929_120000"
+        session_messages = [
+            {"role": "system", "content": "system prompt"},
+            {"role": "user", "content": "initial request"},
+            {"role": "assistant", "content": "draft response"}
+        ]
         session_file = self.repo / ".backlog" / "sessions" / f"{session_id}.json"
         session_data = {
             "issue": issue_num,
-            "messages": [
-                {"role": "system", "content": "system prompt"},
-                {"role": "user", "content": "initial request"},
-                {"role": "assistant", "content": "draft response"}
-            ],
+            "messages": session_messages,
             "timestamp": "2026-09-29T12:00:00"
         }
         session_file.write_text(json.dumps(session_data, indent=2))
         
-        # Mock external dependencies
-        with patch.object(take_agent_module, 'load_issue') as mock_load_issue, \
-             patch.object(take_agent_module, 'run_design_phase') as mock_run_design, \
-             patch.object(agent_core_module, 'get_llm_config') as mock_get_llm_config, \
-             patch.object(take_agent_module, 'review_and_approve') as mock_review:
+        # Create args
+        args = MagicMock()
+        args.issue = issue_num
+        args.plan_only = False
+        args.no_plan = False
+        
+        # Mock all external calls
+        with patch.object(backlog, 'run_command') as mock_run_cmd, \
+             patch.object(backlog, 'git_toplevel', return_value=str(self.repo)), \
+             patch.object(backlog, 'is_working_tree_clean', return_value=True), \
+             patch.object(backlog, 'get_default_branch', return_value='main'), \
+             patch.object(take_agent, 'load_issue') as mock_load_issue, \
+             patch.object(take_agent, 'run_design_phase') as mock_run_design, \
+             patch.object(take_agent, 'review_and_approve') as mock_review, \
+             patch('scripts.agent_core.get_llm_config') as mock_llm_config, \
+             patch('scripts.agent_core.LLMClient') as mock_llm_client, \
+             patch('scripts.agent_core.ToolSandbox') as mock_sandbox:
             
-            # Setup mocks
+            # Setup run_command mock
+            def fake_run_command(cmd, **kwargs):
+                result = MagicMock()
+                result.returncode = 0
+                result.stdout = ""
+                result.stderr = ""
+                
+                # Handle specific commands
+                if cmd[:2] == ["gh", "issue"] and "view" in cmd:
+                    result.stdout = json.dumps({
+                        "number": issue_num,
+                        "title": "Test Issue",
+                        "state": "OPEN",
+                        "labels": [],
+                        "assignees": []
+                    })
+                elif cmd[:2] == ["gh", "api"] and "user" in cmd:
+                    result.stdout = "testuser\n"
+                elif cmd[:2] == ["git", "show-ref"]:
+                    result.returncode = 1  # Branch doesn't exist
+                
+                return result
+            
+            mock_run_cmd.side_effect = fake_run_command
+            
+            # Setup other mocks
             mock_load_issue.return_value = {
                 "number": issue_num,
                 "title": "Test Issue",
-                "body": "Body",
+                "body": "Test body",
                 "labels": [{"name": "type:feat"}]
             }
             
-            mock_get_llm_config.return_value = ("http://example.com", "key", "model", 16000, 300)
+            mock_llm_config.return_value = ("http://api", "key", "model", 16000, 300)
             
-            # Mock run_design_phase to check it receives existing_messages
-            final_spec = {
-                "summary": "Test",
-                "decisions": [{"id": "D1", "topic": "T", "options": ["A"], "chosen": "A", "rationale": "R"}],
-                "files": [],
-                "test_command": "pytest",
-                "tasks": [],
-                "out_of_scope": [],
-                "risks": []
-            }
-            mock_run_design.return_value = (final_spec, [], session_id)
+            # Mock run_design_phase to return None (cancelled)
+            mock_run_design.return_value = (None, [], session_id)
             
-            # Mock review_and_approve to return draft status (so it doesn't try to run TDD)
-            mock_review.return_value = (final_spec, "draft")
-            
-            # Create a minimal args object
-            args = MagicMock()
-            args.issue = issue_num
-            args.plan_only = False
-            args.no_plan = False
-            
-            # Temporarily change to temp dir
-            import os
+            # Call cmd_take
+            import sys
             original_cwd = os.getcwd()
             try:
                 os.chdir(self.repo)
-                
-                # Call cmd_take (will use patched functions)
-                # Note: We need to patch subprocess/git calls too
-                with patch('subprocess.run') as mock_run:
-                    mock_run.return_value = MagicMock(
-                        returncode=0,
-                        stdout="",
-                        stderr=""
-                    )
-                    
-                    # We can't easily test the full cmd_take without mocking everything,
-                    # but we can test the specific logic by directly calling the relevant parts
-                    # Instead, let's test find_session_for_issue and that run_design_phase
-                    # would be called with the right arguments
-                    
-                    # Test find_session_for_issue
-                    found_session = agent_core_module.find_session_for_issue(str(self.repo), issue_num)
-                    self.assertIsNotNone(found_session, "Should find session for issue")
-                    
-                    # Load and verify
-                    messages, loaded_session_id = agent_core_module.load_session(found_session)
-                    self.assertEqual(len(messages), 3)
-                    self.assertEqual(messages[0]["role"], "system")
-                    self.assertEqual(messages[1]["content"], "initial request")
-                    self.assertEqual(loaded_session_id, session_id)
+                backlog.cmd_take(args)
             finally:
                 os.chdir(original_cwd)
+            
+            # Assert run_design_phase was called with existing_messages from session
+            self.assertEqual(mock_run_design.call_count, 1)
+            call_args = mock_run_design.call_args
+            
+            # Check existing_messages parameter
+            self.assertIsNotNone(call_args.kwargs.get('existing_messages'))
+            passed_messages = call_args.kwargs['existing_messages']
+            self.assertEqual(len(passed_messages), 3)
+            self.assertEqual(passed_messages[0]["role"], "system")
+            self.assertEqual(passed_messages[1]["content"], "initial request")
+            self.assertEqual(passed_messages[2]["content"], "draft response")
+            
+            # Check session_id parameter
+            self.assertEqual(call_args.kwargs.get('session_id'), session_id)
     
     def test_take_with_draft_no_session_starts_fresh(self):
-        """Test that take with draft spec but no session starts fresh interview."""
-        from unittest.mock import patch
-        import scripts.agent_core as agent_core_module
+        """Test that cmd_take with draft spec but no session starts fresh design phase."""
+        from unittest.mock import MagicMock, patch
+        import scripts.backlog as backlog
         
         issue_num = 99
         
+        # Import take_agent
+        import sys
+        sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
+        import take_agent
+        
         # Create draft spec
+        spec_dict = {
+            "summary": "Draft without session",
+            "decisions": [],
+            "files": [],
+            "test_command": "pytest",
+            "tasks": [],
+            "out_of_scope": [],
+            "risks": []
+        }
+        
+        issue_dict = {"number": issue_num, "title": "Test Issue 99"}
+        spec_markdown = take_agent.render_spec_markdown(spec_dict, issue_dict)
         spec_path = self.repo / "docs" / "specs" / f"issue-{issue_num}.md"
-        spec_path.write_text("""---
-issue: 99
-status: draft
-test_command: pytest
----
-
-# Draft
-""")
+        spec_path.write_text(spec_markdown)
         
         # Create a session for a DIFFERENT issue
         other_session = self.repo / ".backlog" / "sessions" / "20260929_100000.json"
         other_session.write_text(json.dumps({
             "issue": 88,
-            "messages": [{"role": "user", "content": "other"}],
+            "messages": [{"role": "user", "content": "other issue"}],
             "timestamp": "2026-09-29T10:00:00"
         }))
         
-        # Test find_session_for_issue returns None
-        found = agent_core_module.find_session_for_issue(str(self.repo), issue_num)
-        self.assertIsNone(found, "Should not find session for issue 99")
+        # Create args
+        args = MagicMock()
+        args.issue = issue_num
+        args.plan_only = False
+        args.no_plan = False
+        
+        # Mock all external calls
+        with patch.object(backlog, 'run_command') as mock_run_cmd, \
+             patch.object(backlog, 'git_toplevel', return_value=str(self.repo)), \
+             patch.object(backlog, 'is_working_tree_clean', return_value=True), \
+             patch.object(backlog, 'get_default_branch', return_value='main'), \
+             patch.object(take_agent, 'load_issue') as mock_load_issue, \
+             patch.object(take_agent, 'run_design_phase') as mock_run_design, \
+             patch.object(take_agent, 'review_and_approve') as mock_review, \
+             patch('scripts.agent_core.get_llm_config') as mock_llm_config, \
+             patch('scripts.agent_core.LLMClient') as mock_llm_client, \
+             patch('scripts.agent_core.ToolSandbox') as mock_sandbox:
+            
+            # Setup run_command mock
+            def fake_run_command(cmd, **kwargs):
+                result = MagicMock()
+                result.returncode = 0
+                result.stdout = ""
+                result.stderr = ""
+                
+                if cmd[:2] == ["gh", "issue"] and "view" in cmd:
+                    result.stdout = json.dumps({
+                        "number": issue_num,
+                        "title": "Test Issue 99",
+                        "state": "OPEN",
+                        "labels": [],
+                        "assignees": []
+                    })
+                elif cmd[:2] == ["gh", "api"] and "user" in cmd:
+                    result.stdout = "testuser\n"
+                elif cmd[:2] == ["git", "show-ref"]:
+                    result.returncode = 1  # Branch doesn't exist
+                
+                return result
+            
+            mock_run_cmd.side_effect = fake_run_command
+            
+            # Setup other mocks
+            mock_load_issue.return_value = {
+                "number": issue_num,
+                "title": "Test Issue 99",
+                "body": "Test body",
+                "labels": [{"name": "type:feat"}]
+            }
+            
+            mock_llm_config.return_value = ("http://api", "key", "model", 16000, 300)
+            
+            # Mock run_design_phase to return None (cancelled)
+            mock_run_design.return_value = (None, [], "new_session_id")
+            
+            # Call cmd_take
+            original_cwd = os.getcwd()
+            try:
+                os.chdir(self.repo)
+                backlog.cmd_take(args)
+            finally:
+                os.chdir(original_cwd)
+            
+            # Assert run_design_phase was called with existing_messages=None
+            self.assertEqual(mock_run_design.call_count, 1)
+            call_args = mock_run_design.call_args
+            
+            # Check existing_messages parameter is None (fresh start)
+            self.assertIsNone(call_args.kwargs.get('existing_messages'))
 
 
 if __name__ == "__main__":

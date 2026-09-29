@@ -585,6 +585,7 @@ def cmd_take(args):
         
         if status == "draft":
             print("\nSpec en draft encontrada. Retomando diseño...")
+            spec_status = "draft"
             # Resume design phase (load session if available)
         elif status == "approved":
             print(f"\nSpec aprobada en {spec_file}")
