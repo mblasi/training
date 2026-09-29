@@ -114,7 +114,7 @@ Crear workspace @trainia/shared con healthStatusSchema Zod, exportarlo desde src
 - `packages/shared/tsconfig.json`
 
 **Progreso:**
-- [ ] RED: tests escritos y fallan
+- [x] RED: tests escritos y fallan
 - [ ] GREEN: tests pasan
 - [ ] REFACTOR: código limpio
 
