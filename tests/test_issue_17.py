@@ -210,6 +210,75 @@ FAILED (failures=1)
         output = "Ran 5 tests in 0.123s\n\nOK\n"
         result = detect_empty_run(output)
         self.assertIsNone(result)
+    
+    def test_no_false_positive_on_docstring_mention(self):
+        """Test detect_empty_run returns None when signal is in test docstring, not actual line."""
+        from scripts.tdd_runner import detect_empty_run
+        
+        # Simulates unittest -v output where test docstrings mention the signals
+        output = """test_detects_no_projects_matched (tests.test_issue_17.TestDetectEmptyRun)
+Test detect_empty_run detects 'No projects matched the filters'. ... ok
+test_detects_no_test_files_found (tests.test_issue_17.TestDetectEmptyRun)
+Test detect_empty_run detects 'No test files found'. ... ok
+test_detects_ran_0_tests (tests.test_issue_17.TestDetectEmptyRun)
+Test detect_empty_run detects 'Ran 0 tests'. ... ok
+test_no_detection_on_normal_failure (tests.test_issue_17.TestDetectEmptyRun)
+Test detect_empty_run returns None for normal test failures. ... ok
+
+----------------------------------------------------------------------
+Ran 142 tests in 2.1s
+
+OK
+"""
+        result = detect_empty_run(output)
+        self.assertIsNone(result)
+    
+    def test_detects_real_line_no_projects_matched(self):
+        """Test detect_empty_run detects actual line starting with signal."""
+        from scripts.tdd_runner import detect_empty_run
+        
+        output = """Starting tests...
+No projects matched the filters in "/workspace/project"
+"""
+        result = detect_empty_run(output)
+        self.assertIsNotNone(result)
+        self.assertIn("No projects matched", result)
+    
+    def test_detects_with_ansi_color_codes(self):
+        """Test detect_empty_run detects signal with ANSI escape sequences."""
+        from scripts.tdd_runner import detect_empty_run
+        
+        output = "\x1b[31mNo test files found, exiting with code 1\x1b[0m\n"
+        result = detect_empty_run(output)
+        self.assertIsNotNone(result)
+        self.assertIn("No test files found", result)
+    
+    def test_detects_ran_0_tests_at_line_start(self):
+        """Test detect_empty_run detects 'Ran 0 tests' when it starts a line."""
+        from scripts.tdd_runner import detect_empty_run
+        
+        output = """
+----------------------------------------------------------------------
+Ran 0 tests in 0.000s
+
+OK
+"""
+        result = detect_empty_run(output)
+        self.assertIsNotNone(result)
+        self.assertIn("Ran 0 tests", result)
+    
+    def test_no_detection_ran_10_tests(self):
+        """Test detect_empty_run returns None for 'Ran 10 tests'."""
+        from scripts.tdd_runner import detect_empty_run
+        
+        output = """
+----------------------------------------------------------------------
+Ran 10 tests in 0.543s
+
+OK
+"""
+        result = detect_empty_run(output)
+        self.assertIsNone(result)
 
 
 class TestRedPhaseEmptyRunDetection(unittest.TestCase):
