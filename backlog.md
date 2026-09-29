@@ -4,12 +4,11 @@
 
 ## 🚧 En curso (WIP)
 
-- [ ] [#15](https://github.com/mblasi/training/issues/15) Harness: soporte TDD para monorepo TS/JS y fixes del take (seguir, spec truncada, retomar draft) · fix · @mblasi
 - [ ] ⛔ [#9](https://github.com/mblasi/training/issues/9) Monorepo pnpm: apps/api, apps/admin, apps/mobile, packages/shared + CI · chore · @mblasi
 
 ## 👀 En revisión
 
-_Nada por ahora._
+- [ ] [#15](https://github.com/mblasi/training/issues/15) Harness: soporte TDD para monorepo TS/JS y fixes del take (seguir, spec truncada, retomar draft) · fix · @mblasi
 
 ## 📋 Pendiente
 
