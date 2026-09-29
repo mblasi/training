@@ -163,7 +163,7 @@ Crear workspace admin con React+Vite, componente App que usa HealthStatus de sha
 
 **Progreso:**
 - [x] RED: tests escritos y fallan
-- [ ] GREEN: tests pasan
+- [x] GREEN: tests pasan
 - [ ] REFACTOR: código limpio
 
 ### T5: apps/mobile: placeholder Expo+expo-router con HealthStatus y test
