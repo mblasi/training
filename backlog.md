@@ -4,12 +4,11 @@
 
 ## 🚧 En curso (WIP)
 
-- [ ] [#24](https://github.com/mblasi/training/issues/24) Harness: tool_calls sin tool_result al alcanzar el tope de herramientas del Tech Lead (HTTP 400) · fix · @mblasi
 - [ ] ⛔ [#10](https://github.com/mblasi/training/issues/10) Postgres + pgvector local (Docker) + Drizzle + migraciones iniciales · feat · @mblasi
 
 ## 👀 En revisión
 
-_Nada por ahora._
+- [ ] [#24](https://github.com/mblasi/training/issues/24) Harness: tool_calls sin tool_result al alcanzar el tope de herramientas del Tech Lead (HTTP 400) · fix · @mblasi
 
 ## 📋 Pendiente
 
