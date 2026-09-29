@@ -31,7 +31,7 @@ Postgres 18 + pgvector + Drizzle en apps/api: docker-compose, schema inicial (6 
 | D13c | Enums en DB | pgEnum de Postgres, text con CHECK constraint + text({ enum: [] }) en Drizzle | text con CHECK constraint vía sql`` en drizzle check(); tipo TS via text({ enum: [...] }) | ALTER TYPE en Postgres es costoso; text + check es más flexible para migraciones futuras |
 | D14 | Migraciones SQL commiteadas | SQL commiteado en repo, Generado en CI en cada deploy | 0000_enable_vector.sql (--custom) + 0001_core.sql (drizzle-kit generate); meta/_journal.json + meta/*_snapshot.json commiteados; CI verifica drift con git diff --exit-code | drizzle-kit no genera CREATE EXTENSION; dos migraciones nombradas explícitamente; auditable y reproducible |
 | D15 | buildApp db requerido y arranque del servidor | db opcional con rama sin-db, db requerido siempre | buildApp({ db }) con db requerido; apps/api/src/index.ts llama requireDatabaseUrl(process.env) y crea el cliente antes de buildApp | Sin ramas muertas en producción; falla rápido si falta DATABASE_URL |
-| D16 | El test `test_healthstatus_parse_valid_object` (línea 5-13 de packages/shared/test/health.test.ts) pasa un objeto sin campo `db`, pero el test `test_healthstatus_rejects_missing_db` (línea 53-61) espera que el schema rechace objetos sin `db`. Según la spec, `db` debe ser requerido. ¿Debo asumir que el test de línea 5-13 está mal y va a fallar, o hay que hacer `db` opcional? | D16: el test viejo test_healthstatus_parse_valid_object está mal (quedó del contrato anterior): en RED debe actualizarse con db:'ok'; db es REQUERIDO. Además el cambio de contrato de /health es atómico en los 4 workspaces: T1 incluye apps/api/src/app.ts (impl) y apps/api/test/health.test.ts (tests). Mientras no exista cliente de DB (llega en T10), /health de api responde status 'degraded', db 'error' y HTTP 503 (verdad hasta T10, nunca un db 'ok' falso); T10 reemplaza eso por el chequeo real SELECT 1 con timeout. | D16: el test viejo test_healthstatus_parse_valid_object está mal (quedó del contrato anterior): en RED debe actualizarse con db:'ok'; db es REQUERIDO. Además el cambio de contrato de /health es atómico en los 4 workspaces: T1 incluye apps/api/src/app.ts (impl) y apps/api/test/health.test.ts (tests). Mientras no exista cliente de DB (llega en T10), /health de api responde status 'degraded', db 'error' y HTTP 503 (verdad hasta T10, nunca un db 'ok' falso); T10 reemplaza eso por el chequeo real SELECT 1 con timeout. | Decisión tomada durante implementación |
+| D16 | Contrato de /health durante T1–T9 y test viejo de shared | db requerido; `test_healthstatus_parse_valid_object` se actualiza con db:'ok'. El cambio de contrato es atómico en los 4 workspaces: T1 incluye apps/api/src/app.ts y apps/api/test/health.test.ts. Sin cliente de DB (llega en T10), /health responde status 'degraded', db 'error', HTTP 503; T10 lo reemplaza por el chequeo real SELECT 1 con timeout | Nunca un db 'ok' falso; sin capas de compat. Decisión tomada durante implementación |
 
 ## Archivos afectados
 
@@ -68,9 +68,9 @@ Postgres 18 + pgvector + Drizzle en apps/api: docker-compose, schema inicial (6 
 
 ## Tareas
 
-### T1: Extender healthStatusSchema en shared + actualizar tests de shared, admin y mobile
+### T1: Extender healthStatusSchema en shared + actualizar tests de shared, admin, mobile y api
 
-Modificar healthStatusSchema: status z.enum(['ok','degraded']), db z.enum(['ok','error']) requerido; actualizar todos los fixtures de shared, admin y mobile
+Modificar healthStatusSchema: status z.enum(['ok','degraded']), db z.enum(['ok','error']) requerido; actualizar todos los fixtures de shared, admin y mobile. D16: el cambio de contrato es atómico; /health de api responde status 'degraded', db 'error', HTTP 503 hasta que T10 agregue el chequeo real.
 
 **Tests:**
 - `packages/shared/test/health.test.ts::test_healthstatus_parse_valid_ok_with_db`: parse({status:'ok', version, timestamp, db:'ok'}) no lanza
@@ -82,8 +82,14 @@ Modificar healthStatusSchema: status z.enum(['ok','degraded']), db z.enum(['ok',
 - `apps/admin/test/App.test.tsx::parseHealthResponse throws on invalid response`: fixture sin db lanza
 - `apps/mobile/test/health.test.ts::test_mobile_imports_healthstatus_from_shared`: fixture con db:'ok'; parsed.db === 'ok'
 - `apps/mobile/test/health.test.ts::parseHealthResponse throws on invalid data`: fixture sin db lanza
+- `packages/shared/test/health.test.ts::test_healthstatus_parse_valid_object`: (test existente, D16) actualizar el fixture para incluir db:'ok'; parse no lanza
+- `apps/api/test/health.test.ts::test_get_health_returns_503_degraded_without_db_client`: (D16) GET /health → statusCode 503, body.status === 'degraded', body.db === 'error'
+- `apps/api/test/health.test.ts::test_get_health_body_matches_healthstatus_schema`: (test existente, D16) actualizar: body parseado con healthStatusSchema no lanza e incluye db
 
 **Archivos de soporte de tests:**
+- `apps/api/package.json`
+- `apps/api/tsconfig.json`
+- `apps/api/vitest.config.ts`
 - `packages/shared/package.json`
 - `packages/shared/tsconfig.json`
 - `packages/shared/vitest.config.ts`
@@ -96,6 +102,7 @@ Modificar healthStatusSchema: status z.enum(['ok','degraded']), db z.enum(['ok',
 
 **Archivos de implementación:**
 - `packages/shared/src/health.ts`
+- `apps/api/src/app.ts`
 
 **Progreso:**
 - [ ] RED: tests escritos y fallan
