@@ -185,7 +185,7 @@ Crear workspace mobile con Expo y expo-router, pantalla app/index.tsx que usa He
 - `apps/mobile/tsconfig.json`
 
 **Progreso:**
-- [ ] RED: tests escritos y fallan
+- [x] RED: tests escritos y fallan
 - [ ] GREEN: tests pasan
 - [ ] REFACTOR: código limpio
 

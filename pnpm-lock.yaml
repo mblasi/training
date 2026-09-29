@@ -238,6 +238,24 @@ importers:
         specifier: ^3.0.0
         version: 3.2.7(@types/node@24.19.0)(jsdom@26.1.0(supports-color@7.2.0))(supports-color@7.2.0)
 
+  apps/mobile:
+    devDependencies:
+      '@types/node':
+        specifier: ^24.0.0
+        version: 24.19.0
+      eslint:
+        specifier: ^9.0.0
+        version: 9.39.5(supports-color@7.2.0)
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+      typescript-eslint:
+        specifier: ^8.71.0
+        version: 8.71.0(eslint@9.39.5(supports-color@7.2.0))(supports-color@7.2.0)(typescript@5.9.3)
+      vitest:
+        specifier: ^3.0.0
+        version: 3.2.7(@types/node@24.19.0)(jsdom@26.1.0(supports-color@7.2.0))(supports-color@7.2.0)
+
   packages/shared:
     dependencies:
       zod:
