@@ -206,7 +206,7 @@ Agregar job 'node' paralelo en ci.yml con Node 24+corepack+pnpm install --frozen
 **Progreso:**
 - [x] RED: tests escritos y fallan
 - [x] GREEN: tests pasan
-- [ ] REFACTOR: código limpio
+- [x] REFACTOR: código limpio
 
 ## Fuera de alcance
 
