@@ -6,8 +6,8 @@ Verifica que los archivos de configuración raíz del monorepo pnpm existan y te
 los valores acordados en las decisiones de diseño.
 """
 import json
+import re
 import unittest
-import yaml
 from pathlib import Path
 
 
@@ -26,12 +26,31 @@ class TestMonorepoRoot(unittest.TestCase):
             "pnpm-workspace.yaml debe existir en la raíz del repo"
         )
 
+        # Parse manual del subset YAML que necesitamos: top-level 'packages:' con lista de strings
         with open(workspace_file, 'r') as f:
-            content = yaml.safe_load(f)
-
-        self.assertIn('packages', content, "pnpm-workspace.yaml debe tener clave 'packages'")
-        packages = content['packages']
-        self.assertIsInstance(packages, list, "'packages' debe ser una lista")
+            lines = f.readlines()
+        
+        packages = []
+        in_packages_section = False
+        for line in lines:
+            # Detectar inicio de sección packages:
+            if re.match(r'^packages:\s*$', line):
+                in_packages_section = True
+                continue
+            # Detectar fin de sección (clave al mismo nivel que packages)
+            if in_packages_section and re.match(r'^[a-zA-Z]', line):
+                in_packages_section = False
+            # Extraer items de lista (líneas que empiezan con '  - ')
+            if in_packages_section:
+                match = re.match(r"^\s+-\s+'([^']+)'", line)
+                if not match:
+                    match = re.match(r'^\s+-\s+"([^"]+)"', line)
+                if not match:
+                    match = re.match(r'^\s+-\s+([^\s]+)', line)
+                if match:
+                    packages.append(match.group(1))
+        
+        self.assertTrue(len(packages) > 0, "pnpm-workspace.yaml debe tener al menos un package")
         self.assertIn('apps/*', packages, "packages debe incluir 'apps/*'")
         self.assertIn('packages/*', packages, "packages debe incluir 'packages/*'")
 
