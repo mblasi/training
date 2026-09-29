@@ -52,3 +52,8 @@ htmlcov/
 
 # Backlog agent sessions
 .backlog/
+
+# Node
+node_modules/
+.expo/
+*.tsbuildinfo
