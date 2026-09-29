@@ -618,7 +618,7 @@ _(ninguno)_
         
         fake_coder = self._create_fake_coder(script)
         
-        inputs = ["y", "abortar"]  # Confirm RED, abort after 3 GREEN failures
+        inputs = ["abortar"]  # Abort after 3 GREEN failures
         input_idx = [0]
         
         def mock_input(prompt: str) -> str:
@@ -1655,6 +1655,224 @@ class TestTakeWithDraftSpec(unittest.TestCase):
             
             import shutil
             shutil.rmtree(temp_home, ignore_errors=True)
+
+
+class TestUserChoiceSemantics(unittest.TestCase):
+    """Regression tests for user-choice semantics (issue #21 fix)."""
+    
+    def setUp(self):
+        """Create a temporary git repo."""
+        self.temp_dir = tempfile.mkdtemp(prefix="user_choice_test_")
+        self.repo = Path(self.temp_dir)
+        
+        self._run(["git", "init"])
+        self._run(["git", "config", "user.email", "test@test.com"])
+        self._run(["git", "config", "user.name", "Test User"])
+        
+        (self.repo / "tests").mkdir()
+        (self.repo / "src").mkdir()
+        (self.repo / "docs" / "specs").mkdir(parents=True)
+        (self.repo / ".backlog" / "runs").mkdir(parents=True)
+        (self.repo / ".gitignore").write_text("__pycache__/\n.backlog/\n")
+        
+        (self.repo / "src" / "__init__.py").write_text("")
+        (self.repo / "src" / "calc.py").write_text("def add(a, b): raise NotImplementedError()\n")
+        (self.repo / "tests" / "__init__.py").write_text("")
+        
+        self._run(["git", "add", "."])
+        self._run(["git", "commit", "-m", "initial"])
+        
+        self._create_spec()
+        self.coder_calls = []
+    
+    def tearDown(self):
+        """Clean up."""
+        import shutil
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+    
+    def _run(self, cmd: list[str], cwd: str = None, timeout: int = None) -> subprocess.CompletedProcess:
+        """Run command."""
+        return subprocess.run(
+            cmd,
+            cwd=cwd or self.repo,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False
+        )
+    
+    def _create_spec(self):
+        """Create spec."""
+        import sys
+        scripts_path = str(Path(__file__).parent.parent / "scripts")
+        if scripts_path not in sys.path:
+            sys.path.insert(0, scripts_path)
+        from take_agent import render_spec_markdown, set_status
+        
+        spec_dict = {
+            "summary": "Test",
+            "decisions": [],
+            "files": [],
+            "test_command": "python3 -m unittest discover -s tests -v",
+            "tasks": [
+                {
+                    "id": "T1",
+                    "title": "Feature",
+                    "description": "Desc",
+                    "tests": [{"file": "tests/test_calc.py", "name": "test_add", "asserts": "add(2,3)==5"}],
+                    "impl_files": ["src/calc.py"]
+                }
+            ],
+            "out_of_scope": [],
+            "risks": []
+        }
+        
+        issue_dict = {"number": 1, "title": "Test"}
+        spec_md = render_spec_markdown(spec_dict, issue_dict)
+        spec_path = self.repo / "docs" / "specs" / "issue-1.md"
+        spec_path.write_text(spec_md)
+        
+        set_status(str(spec_path), "approved")
+        
+        self._run(["git", "add", "."])
+        self._run(["git", "commit", "-m", "docs: spec"])
+    
+    def test_green_reintentar_grants_another_attempt(self):
+        """In GREEN, answering 'reintentar' after 3 failures should grant another attempt."""
+        from scripts.tdd_runner import run_tdd_implementation
+        
+        # Mark RED as done
+        spec_path = self.repo / "docs" / "specs" / "issue-1.md"
+        spec_content = spec_path.read_text()
+        spec_content = spec_content.replace("- [ ] RED:", "- [x] RED:")
+        spec_content = spec_content.replace("status: approved", "status: implementing")
+        spec_path.write_text(spec_content)
+        
+        (self.repo / "tests" / "test_calc.py").write_text(
+            "import unittest\n"
+            "from src.calc import add\n\n"
+            "class TestCalc(unittest.TestCase):\n"
+            "    def test_add(self):\n"
+            "        self.assertEqual(add(2, 3), 5)\n"
+        )
+        self._run(["git", "add", "."])
+        self._run(["git", "commit", "-m", "test: add (#1)"])
+        
+        call_count = [0]
+        
+        def fake_coder(prompt: str, log_path: str) -> tuple[int, str]:
+            self.coder_calls.append(log_path)
+            if "green" in log_path.lower():
+                call_count[0] += 1
+                if call_count[0] <= 3:
+                    # Wrong impl
+                    (self.repo / "src" / "calc.py").write_text("def add(a, b): return 0\n")
+                    return 0, "Wrong"
+                elif call_count[0] == 4:
+                    # After "reintentar", correct impl
+                    (self.repo / "src" / "calc.py").write_text("def add(a, b): return a + b\n")
+                    return 0, "Correct"
+            elif "refactor" in log_path.lower():
+                return 0, "SIN_REFACTOR"
+            return 1, "Unknown"
+        
+        # After 3 GREEN failures, answer "reintentar"
+        inputs = ["reintentar"]
+        input_idx = [0]
+        
+        def mock_input(prompt: str) -> str:
+            if input_idx[0] < len(inputs):
+                result = inputs[input_idx[0]]
+                input_idx[0] += 1
+                return result
+            return "abortar"
+        
+        outputs = []
+        def mock_print(msg: str) -> None:
+            outputs.append(msg)
+        
+        result = run_tdd_implementation(
+            repo_root=str(self.repo),
+            issue_num=1,
+            coder=fake_coder,
+            run_cmd=self._run,
+            input_fn=mock_input,
+            print_fn=mock_print
+        )
+        
+        # Should succeed (4th attempt worked)
+        self.assertTrue(result, "Answering 'reintentar' should grant another GREEN attempt")
+        
+        # Should have exactly 4 GREEN calls
+        green_calls = [c for c in self.coder_calls if "green" in c.lower()]
+        self.assertEqual(len(green_calls), 4, f"Expected 4 GREEN calls after reintentar, got {len(green_calls)}")
+    
+    def test_green_non_abortar_does_not_abort(self):
+        """In GREEN, answering anything OTHER than 'abortar' should retry."""
+        from scripts.tdd_runner import run_tdd_implementation
+        
+        # Mark RED as done
+        spec_path = self.repo / "docs" / "specs" / "issue-1.md"
+        spec_content = spec_path.read_text()
+        spec_content = spec_content.replace("- [ ] RED:", "- [x] RED:")
+        spec_content = spec_content.replace("status: approved", "status: implementing")
+        spec_path.write_text(spec_content)
+        
+        (self.repo / "tests" / "test_calc.py").write_text(
+            "import unittest\n"
+            "from src.calc import add\n\n"
+            "class TestCalc(unittest.TestCase):\n"
+            "    def test_add(self):\n"
+            "        self.assertEqual(add(2, 3), 5)\n"
+        )
+        self._run(["git", "add", "."])
+        self._run(["git", "commit", "-m", "test: add (#1)"])
+        
+        call_count = [0]
+        
+        def fake_coder(prompt: str, log_path: str) -> tuple[int, str]:
+            self.coder_calls.append(log_path)
+            if "green" in log_path.lower():
+                call_count[0] += 1
+                if call_count[0] <= 3:
+                    (self.repo / "src" / "calc.py").write_text("def add(a, b): return 0\n")
+                    return 0, "Wrong"
+                elif call_count[0] == 4:
+                    (self.repo / "src" / "calc.py").write_text("def add(a, b): return a + b\n")
+                    return 0, "Correct"
+            elif "refactor" in log_path.lower():
+                return 0, "SIN_REFACTOR"
+            return 1, "Unknown"
+        
+        # After 3 failures, answer "xyz" (not "abortar" or "reintentar")
+        inputs = ["xyz"]
+        input_idx = [0]
+        
+        def mock_input(prompt: str) -> str:
+            if input_idx[0] < len(inputs):
+                result = inputs[input_idx[0]]
+                input_idx[0] += 1
+                return result
+            return "abortar"
+        
+        outputs = []
+        def mock_print(msg: str) -> None:
+            outputs.append(msg)
+        
+        result = run_tdd_implementation(
+            repo_root=str(self.repo),
+            issue_num=1,
+            coder=fake_coder,
+            run_cmd=self._run,
+            input_fn=mock_input,
+            print_fn=mock_print
+        )
+        
+        # Should succeed (answering non-"abortar" retries)
+        self.assertTrue(result, "Answering non-'abortar' should retry in GREEN")
+        
+        green_calls = [c for c in self.coder_calls if "green" in c.lower()]
+        self.assertEqual(len(green_calls), 4, f"Expected 4 GREEN calls, got {len(green_calls)}")
 
 
 if __name__ == "__main__":

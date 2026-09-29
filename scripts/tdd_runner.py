@@ -548,7 +548,7 @@ def run_red_phase(
         if exit_code != 0:
             print_fn(f"Error: coder falló con código {exit_code}")
             user_choice = input_fn("Reintentar o abortar? (r/abortar): ").strip().lower()
-            if user_choice != "reintentar":
+            if user_choice == "abortar":
                 return False
             attempt += 1
             continue
@@ -603,7 +603,7 @@ def run_red_phase(
                 continue
             else:
                 user_choice = input_fn("Continuar o abortar? (continuar/abortar): ").strip().lower()
-                if user_choice != "reintentar":
+                if user_choice == "abortar":
                     return False
                 break
         
@@ -641,7 +641,7 @@ def run_red_phase(
                 continue
             else:
                 user_choice = input_fn("Continuar o abortar? (continuar/abortar): ").strip().lower()
-                if user_choice != "reintentar":
+                if user_choice == "abortar":
                     return False
                 break
         
@@ -668,7 +668,7 @@ def run_red_phase(
                 continue
             else:
                 user_choice = input_fn("Continuar o abortar? (continuar/abortar): ").strip().lower()
-                if user_choice != "reintentar":
+                if user_choice == "abortar":
                     return False
                 break
         
@@ -696,7 +696,7 @@ def run_red_phase(
                 continue
             else:
                 user_choice = input_fn("Continuar o abortar? (continuar/abortar): ").strip().lower()
-                if user_choice != "reintentar":
+                if user_choice == "abortar":
                     return False
                 break
         
@@ -837,7 +837,7 @@ def run_green_phase(
                 continue
             else:
                 user_choice = input_fn("Reintentar o abortar? (reintentar/abortar): ").strip().lower()
-                if user_choice != "reintentar":
+                if user_choice == "abortar":
                     return False
                 max_attempts += 1
                 # Increment BOTH to maintain "last attempt" state
@@ -862,7 +862,7 @@ def run_green_phase(
                 continue
             else:
                 user_choice = input_fn("Reintentar o abortar? (reintentar/abortar): ").strip().lower()
-                if user_choice != "reintentar":
+                if user_choice == "abortar":
                     return False
                 max_attempts += 1
                 # Increment BOTH to maintain "last attempt" state
@@ -878,10 +878,10 @@ def run_green_phase(
                 continue
             else:
                 user_choice = input_fn("Reintentar o abortar? (reintentar/abortar): ").strip().lower()
-                if user_choice != "reintentar":
+                if user_choice == "abortar":
                     return False
-                # Increment BOTH to maintain the "last attempt" state
                 max_attempts += 1
+                # Increment BOTH to maintain "last attempt" state
                 attempt += 1
                 continue
         
