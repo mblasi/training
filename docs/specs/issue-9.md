@@ -139,7 +139,7 @@ Crear workspace api con Fastify, ruta GET /health que retorna HealthStatus valid
 
 **Progreso:**
 - [x] RED: tests escritos y fallan
-- [ ] GREEN: tests pasan
+- [x] GREEN: tests pasan
 - [ ] REFACTOR: código limpio
 
 ### T4: apps/admin: placeholder React+Vite con HealthStatus y test de render con jsdom
