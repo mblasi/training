@@ -4,12 +4,11 @@
 
 ## 🚧 En curso (WIP)
 
-- [ ] [#21](https://github.com/mblasi/training/issues/21) Harness: lockfiles permitidos en RED y /DESVIO sin consumir intento · fix · @mblasi
 - [ ] ⛔ [#9](https://github.com/mblasi/training/issues/9) Monorepo pnpm: apps/api, apps/admin, apps/mobile, packages/shared + CI · chore · @mblasi
 
 ## 👀 En revisión
 
-_Nada por ahora._
+- [ ] [#21](https://github.com/mblasi/training/issues/21) Harness: lockfiles permitidos en RED y /DESVIO sin consumir intento · fix · @mblasi
 
 ## 📋 Pendiente
 
