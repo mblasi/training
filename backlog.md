@@ -4,12 +4,11 @@
 
 ## 🚧 En curso (WIP)
 
-- [ ] [#19](https://github.com/mblasi/training/issues/19) Harness: falso positivo en detección de corridas vacías (matchea docstrings de tests) · fix · @mblasi
 - [ ] ⛔ [#9](https://github.com/mblasi/training/issues/9) Monorepo pnpm: apps/api, apps/admin, apps/mobile, packages/shared + CI · chore · @mblasi
 
 ## 👀 En revisión
 
-_Nada por ahora._
+- [ ] [#19](https://github.com/mblasi/training/issues/19) Harness: falso positivo en detección de corridas vacías (matchea docstrings de tests) · fix · @mblasi
 
 ## 📋 Pendiente
 
