@@ -296,12 +296,12 @@ def cmd_new(args):
     
     # Get LLM config
     try:
-        base_url, api_key, model = issue_agent.get_llm_config()
+        base_url, api_key, model, max_tokens, timeout = issue_agent.get_llm_config()
     except ValueError as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
     
-    client = issue_agent.LLMClient(base_url, api_key, model)
+    client = issue_agent.LLMClient(base_url, api_key, model, max_tokens, timeout)
     sandbox = issue_agent.ToolSandbox(repo_root)
     
     # Handle --resume
@@ -629,25 +629,74 @@ def cmd_take(args):
         # Get LLM config
         try:
             import agent_core
-            base_url, api_key, model = agent_core.get_llm_config()
+            base_url, api_key, model, max_tokens, timeout = agent_core.get_llm_config()
         except ValueError as e:
             print(f"Error: {e}", file=sys.stderr)
             sys.exit(1)
         
-        client = agent_core.LLMClient(base_url, api_key, model)
+        client = agent_core.LLMClient(base_url, api_key, model, max_tokens, timeout)
         sandbox = agent_core.ToolSandbox(repo_root)
         
         # Load full issue (with comments)
         full_issue = take_agent.load_issue(issue_num)
         
+        # Check if we should resume from an existing session
+        existing_messages = None
+        session_id = None
+        
+        if spec_status == "draft":
+            # Try to find session for this issue
+            session_path = agent_core.find_session_for_issue(repo_root, issue_num)
+            if session_path:
+                print(f"Resumiendo desde sesión guardada: {session_path}\n")
+                existing_messages, session_id = agent_core.load_session(session_path)
+        
         # Run design interview
         spec, messages, session_id = take_agent.run_design_phase(
-            client, sandbox, repo_root, full_issue
+            client, sandbox, repo_root, full_issue,
+            existing_messages=existing_messages,
+            session_id=session_id
         )
         
         if not spec:
             print("Diseño cancelado o sin resultado.")
             return
+        
+        # Define continue function for [s]eguir
+        def continue_design(user_message: str):
+            """Continue the design conversation with a new user message."""
+            # Append user message to existing messages
+            updated_messages = messages + [{"role": "user", "content": user_message}]
+            # Continue interview with existing messages
+            return take_agent.run_design_phase(
+                client, sandbox, repo_root, full_issue,
+                existing_messages=updated_messages,
+                session_id=session_id
+            )
+        
+        # Define continue_fn for "[s]eguir" option
+        def continue_interview(user_msg: str):
+            """Continue the design conversation with the Tech Lead."""
+            nonlocal messages, session_id
+            
+            # Append user message to the conversation
+            messages.append({"role": "user", "content": user_msg})
+            
+            # Continue the interview with existing messages
+            new_spec, new_messages, new_session_id = take_agent.run_design_phase(
+                client=client,
+                sandbox=sandbox,
+                repo_root=repo_root,
+                issue=full_issue,
+                existing_messages=messages,
+                session_id=session_id
+            )
+            
+            # Update messages and session_id for next iteration
+            messages = new_messages
+            session_id = new_session_id
+            
+            return new_spec, new_messages, new_session_id
         
         # Preview and approval loop
         spec, approval_status = take_agent.review_and_approve(
@@ -656,7 +705,8 @@ def cmd_take(args):
             spec_file=spec_file,
             branch_name=branch_name,
             repo_root=repo_root,
-            run_command=run_command
+            run_command=run_command,
+            continue_fn=continue_interview
         )
         
         if approval_status == "approved":
