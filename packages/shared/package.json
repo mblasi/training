@@ -2,12 +2,21 @@
   "name": "@trainia/shared",
   "version": "0.1.0",
   "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
   "scripts": {
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "zod": "^3.24.1"
   },
   "devDependencies": {
-    "vitest": "^3.0.0",
-    "typescript": "^5.7.0"
+    "eslint": "^9.0.0",
+    "typescript": "^5.7.0",
+    "typescript-eslint": "^8.71.0",
+    "vitest": "^3.0.0"
   }
 }

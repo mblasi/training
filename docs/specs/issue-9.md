@@ -115,7 +115,7 @@ Crear workspace @trainia/shared con healthStatusSchema Zod, exportarlo desde src
 
 **Progreso:**
 - [x] RED: tests escritos y fallan
-- [ ] GREEN: tests pasan
+- [x] GREEN: tests pasan
 - [ ] REFACTOR: código limpio
 
 ### T3: apps/api: GET /health con Fastify y test con app.inject()
