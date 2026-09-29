@@ -1,16 +1,18 @@
 import Fastify from 'fastify';
-import type { HealthStatus } from '@trainia/shared';
+import { healthStatusSchema } from '@trainia/shared';
+import pkg from '../package.json' with { type: 'json' };
 
 export function buildApp() {
   const app = Fastify();
 
   app.get('/health', async () => {
-    const response: HealthStatus = {
-      status: 'ok',
-      version: '0.1.0',
+    const response = {
+      status: 'ok' as const,
+      version: pkg.version,
       timestamp: new Date().toISOString(),
     };
-    return response;
+    // Validate with Zod before returning
+    return healthStatusSchema.parse(response);
   });
 
   return app;

@@ -7,13 +7,28 @@ Trainia (trainia.blasi.ar): app de entrenamiento autogestionada con un equipo de
 
 ## Desarrollo
 
+### Prerrequisitos
+
+- Node 24 LTS (ver `.nvmrc`)
+- Corepack habilitado: `corepack enable`
+
+### Comandos raíz
+
+Desde la raíz del monorepo:
+
+```bash
+corepack pnpm install         # instalar dependencias
+corepack pnpm lint            # lint en todos los workspaces
+corepack pnpm typecheck       # typecheck en todos los workspaces
+corepack pnpm test            # tests en todos los workspaces
+```
+
 ### apps/api
 
 API backend con Fastify. Servidor de desarrollo:
 
 ```bash
-cd apps/api
-pnpm dev
+corepack pnpm --filter ./apps/api dev
 ```
 
 ### apps/admin
@@ -21,8 +36,13 @@ pnpm dev
 Panel de administración React+Vite. Servidor de desarrollo:
 
 ```bash
-cd apps/admin
-pnpm dev
+corepack pnpm --filter ./apps/admin dev
+```
+
+Build de producción:
+
+```bash
+corepack pnpm --filter ./apps/admin build
 ```
 
 ### apps/mobile
@@ -30,8 +50,13 @@ pnpm dev
 App móvil con Expo. Servidor de desarrollo:
 
 ```bash
-cd apps/mobile
-pnpm start
+corepack pnpm --filter ./apps/mobile start
+```
+
+Servidor web:
+
+```bash
+corepack pnpm --filter ./apps/mobile web
 ```
 
 ## Flujo de trabajo

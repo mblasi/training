@@ -1,0 +1,20 @@
+{
+  "expo": {
+    "name": "Trainia",
+    "slug": "trainia",
+    "scheme": "trainia",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "platforms": [
+      "ios",
+      "android",
+      "web"
+    ]
+  }
+}
