@@ -8,7 +8,7 @@
 
 ## 👀 En revisión
 
-- [ ] [#15](https://github.com/mblasi/training/issues/15) Harness: soporte TDD para monorepo TS/JS y fixes del take (seguir, spec truncada, retomar draft) · fix · @mblasi
+_Nada por ahora._
 
 ## 📋 Pendiente
 
@@ -22,6 +22,7 @@
 
 ## ✅ Hecho
 
+- [x] [#15](https://github.com/mblasi/training/issues/15) Harness: soporte TDD para monorepo TS/JS y fixes del take (seguir, spec truncada, retomar draft) · fix · @mblasi
 - [x] [#7](https://github.com/mblasi/training/issues/7) docs: registrar decisiones de producto en DESIGN.md · docs · @mblasi
 - [x] [#5](https://github.com/mblasi/training/issues/5) backlog take: spec de implementación acordada con el usuario + implementación TDD controlada por el harness · feat · @mblasi
 - [x] [#3](https://github.com/mblasi/training/issues/3) backlog new: agente entrevistador que especifica el issue antes de crearlo · feat · @mblasi
