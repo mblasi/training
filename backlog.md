@@ -14,6 +14,7 @@ _Nada por ahora._
 
 ### Fase 0 - Fundaciones
 
+- [ ] [#17](https://github.com/mblasi/training/issues/17) Harness: prompt de RED/GREEN con test_support_files y detección de corridas vacías · fix
 - [ ] [#14](https://github.com/mblasi/training/issues/14) Stores: cuentas de desarrollador, EAS y build interno de la app · infra
 - [ ] [#13](https://github.com/mblasi/training/issues/13) Infra: proyecto GCP dedicado, Cloud Run + Cloud SQL staging y dominios trainia.blasi.ar · infra
 - [ ] [#12](https://github.com/mblasi/training/issues/12) Capa llm/ multi-proveedor (Nous Portal + Gemini) con rutas por agente y registro de llamadas · feat
