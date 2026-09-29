@@ -18,6 +18,27 @@ sys.path.insert(0, str(repo_root / "scripts"))
 import agent_core
 
 
+def assert_tool_pairs_valid(messages, context=""):
+    """Helper to assert tool_calls/tool_result invariant."""
+    for i, msg in enumerate(messages):
+        if msg.get("role") == "assistant" and msg.get("tool_calls"):
+            tool_call_ids = {tc["id"] for tc in msg["tool_calls"]}
+            
+            # Collect tool messages immediately following
+            j = i + 1
+            found_ids = set()
+            while j < len(messages) and messages[j].get("role") == "tool":
+                found_ids.add(messages[j]["tool_call_id"])
+                j += 1
+            
+            # All tool_call_ids must have corresponding tool results
+            missing = tool_call_ids - found_ids
+            if missing:
+                raise AssertionError(
+                    f"{context}: assistant at index {i} has tool_calls {tool_call_ids} but missing tool results for {missing}"
+                )
+
+
 class TestRepairToolPairs(unittest.TestCase):
     """Test repair_tool_pairs function."""
     
@@ -203,7 +224,7 @@ class TestToolCapIntegration(unittest.TestCase):
         
         # Verify invariant on ALL chat calls
         for i, call_messages in enumerate(chat_calls):
-            self._assert_tool_pairs_valid(call_messages, f"call #{i+1}")
+            assert_tool_pairs_valid(call_messages, f"call #{i+1}")
         
         # Check that warning appeared
         output_text = " ".join(outputs)
@@ -219,32 +240,113 @@ class TestToolCapIntegration(unittest.TestCase):
             if msg.get("role") == "assistant" and msg.get("tool_calls"):
                 fourth_assistant = msg
         
-        if fourth_assistant:
-            # Next message should be synthetic tool result
-            idx = messages.index(fourth_assistant)
-            next_msg = messages[idx + 1]
-            self.assertEqual(next_msg["role"], "tool")
-            self.assertIn("límite", next_msg["content"].lower())
-    
-    def _assert_tool_pairs_valid(self, messages, context=""):
-        """Helper to assert tool_calls/tool_result invariant."""
+        # Assert it exists and find the one with call_4
+        self.assertIsNotNone(fourth_assistant, "Should have assistant with tool_calls")
+        
+        # Find specifically the assistant with call_4
+        call_4_idx = None
         for i, msg in enumerate(messages):
             if msg.get("role") == "assistant" and msg.get("tool_calls"):
-                tool_call_ids = {tc["id"] for tc in msg["tool_calls"]}
-                
-                # Collect tool messages immediately following
-                j = i + 1
-                found_ids = set()
-                while j < len(messages) and messages[j].get("role") == "tool":
-                    found_ids.add(messages[j]["tool_call_id"])
-                    j += 1
-                
-                # All tool_call_ids must have corresponding tool results
-                missing = tool_call_ids - found_ids
-                self.assertEqual(
-                    missing, set(),
-                    f"{context}: assistant at index {i} has tool_calls {tool_call_ids} but missing tool results for {missing}"
-                )
+                if any(tc["id"] == "call_4" for tc in msg["tool_calls"]):
+                    call_4_idx = i
+                    break
+        
+        self.assertIsNotNone(call_4_idx, "Should find assistant with call_4")
+        # Next message should be synthetic tool result
+        next_msg = messages[call_4_idx + 1]
+        self.assertEqual(next_msg["role"], "tool")
+        self.assertEqual(next_msg["tool_call_id"], "call_4")
+        self.assertIn("límite", next_msg["content"].lower())
+    
+    def test_cap_without_repair_isolation(self):
+        """Test that block B works without repair_tool_pairs hiding it."""
+        # Track all messages sent to chat()
+        chat_calls = []
+        call_count = [0]
+        
+        def fake_chat(messages, tools=None):
+            # Deep copy to capture state at call time
+            chat_calls.append(copy.deepcopy(messages))
+            call_count[0] += 1
+            
+            # First 4 calls: return tool_calls
+            if call_count[0] <= 4:
+                return {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [
+                        {"id": f"call_{call_count[0]}", "function": {"name": "read_file", "arguments": '{"path": "test.py"}'}}
+                    ],
+                    "finish_reason": "tool_calls"
+                }
+            else:
+                # After cap, return text
+                return {
+                    "role": "assistant",
+                    "content": "continuing without tools",
+                    "finish_reason": "stop"
+                }
+        
+        client = MagicMock()
+        client.chat = fake_chat
+        
+        # Mock sandbox execute_tool to track calls
+        execute_calls = []
+        
+        def tracked_execute(self, name, args):
+            execute_calls.append((name, args))
+            return "mocked result"
+        
+        # Patch repair_tool_pairs to identity (no repair)
+        with patch.object(agent_core.ToolSandbox, 'execute_tool', tracked_execute):
+            with patch.object(agent_core, 'repair_tool_pairs', side_effect=lambda m: list(m)):
+                with tempfile.TemporaryDirectory() as tmpdir:
+                    sandbox = agent_core.ToolSandbox(tmpdir)
+                    
+                    # Set cap to 3
+                    with patch.dict(os.environ, {"BACKLOG_LLM_MAX_TOOL_ROUNDS": "3"}):
+                        outputs = []
+                        inputs_queue = ["/cancelar"]
+                        
+                        spec, messages, sid = agent_core.run_generic_interview(
+                            client=client,
+                            sandbox=sandbox,
+                            repo_root=tmpdir,
+                            system_prompt="system",
+                            initial_user_message="start",
+                            spec_validator=lambda s: (True, ""),
+                            input_fn=lambda p: inputs_queue.pop(0) if inputs_queue else "/cancelar",
+                            print_fn=lambda m: outputs.append(m)
+                        )
+        
+        # Verify invariant on ALL recorded chat requests
+        for i, call_messages in enumerate(chat_calls):
+            assert_tool_pairs_valid(call_messages, f"chat call #{i+1}")
+        
+        # Verify final messages also satisfy invariant
+        assert_tool_pairs_valid(messages, "final messages")
+        
+        # Find the capped assistant (call_4) in final messages
+        call_4_idx = None
+        for i, msg in enumerate(messages):
+            if msg.get("role") == "assistant" and msg.get("tool_calls"):
+                if any(tc["id"] == "call_4" for tc in msg["tool_calls"]):
+                    call_4_idx = i
+                    break
+        
+        self.assertIsNotNone(call_4_idx, "Should find capped assistant with call_4")
+        
+        # Immediately following should be synthetic tool result, then user warning
+        self.assertLess(call_4_idx + 2, len(messages), "Should have tool result and user warning after capped assistant")
+        
+        synthetic_tool = messages[call_4_idx + 1]
+        self.assertEqual(synthetic_tool["role"], "tool", "Should have synthetic tool result immediately after capped assistant")
+        self.assertEqual(synthetic_tool["tool_call_id"], "call_4")
+        self.assertIn("límite", synthetic_tool["content"].lower())
+        
+        user_warning = messages[call_4_idx + 2]
+        self.assertEqual(user_warning["role"], "user", "Should have user warning after synthetic tool result")
+        self.assertIn("herramientas", user_warning["content"].lower())
 
 
 class TestToolCapConfig(unittest.TestCase):
@@ -426,6 +528,80 @@ class TestToolCapConfig(unittest.TestCase):
                     
                     # Should use default 20
                     self.assertEqual(execute_count[0], 20)
+
+
+class TestSavedSessionInvariant(unittest.TestCase):
+    """Test that saved session files satisfy the invariant."""
+    
+    def test_saved_session_satisfies_invariant(self):
+        """Test that saved session file after run satisfies invariant."""
+        call_count = [0]
+        
+        def fake_chat(messages, tools=None):
+            call_count[0] += 1
+            
+            # First 4 calls: return tool_calls
+            if call_count[0] <= 4:
+                return {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [
+                        {"id": f"call_{call_count[0]}", "function": {"name": "read_file", "arguments": '{"path": "test.py"}'}}
+                    ],
+                    "finish_reason": "tool_calls"
+                }
+            else:
+                # After cap, return text
+                return {
+                    "role": "assistant",
+                    "content": "continuing without tools",
+                    "finish_reason": "stop"
+                }
+        
+        client = MagicMock()
+        client.chat = fake_chat
+        
+        execute_calls = []
+        
+        def tracked_execute(self, name, args):
+            execute_calls.append((name, args))
+            return "mocked result"
+        
+        with patch.object(agent_core.ToolSandbox, 'execute_tool', tracked_execute):
+            with tempfile.TemporaryDirectory() as tmpdir:
+                sandbox = agent_core.ToolSandbox(tmpdir)
+                
+                # Set cap to 3
+                with patch.dict(os.environ, {"BACKLOG_LLM_MAX_TOOL_ROUNDS": "3"}):
+                    outputs = []
+                    inputs_queue = ["/cancelar"]
+                    
+                    spec, messages, sid = agent_core.run_generic_interview(
+                        client=client,
+                        sandbox=sandbox,
+                        repo_root=tmpdir,
+                        system_prompt="system",
+                        initial_user_message="start",
+                        spec_validator=lambda s: (True, ""),
+                        input_fn=lambda p: inputs_queue.pop(0) if inputs_queue else "/cancelar",
+                        print_fn=lambda m: outputs.append(m)
+                    )
+                
+                # Load the saved session file
+                sessions_dir = Path(tmpdir) / ".backlog" / "sessions"
+                self.assertTrue(sessions_dir.exists(), "Sessions directory should exist")
+                
+                json_files = list(sessions_dir.glob("*.json"))
+                self.assertEqual(len(json_files), 1, "Should have exactly one session file")
+                
+                session_file = json_files[0]
+                with open(session_file, "r") as f:
+                    session_data = json.load(f)
+                
+                saved_messages = session_data["messages"]
+                
+                # Verify invariant on saved messages
+                assert_tool_pairs_valid(saved_messages, "saved session")
 
 
 class TestResumeCorruptedSession(unittest.TestCase):

@@ -15,6 +15,10 @@ from urllib import request
 from urllib.error import HTTPError
 
 
+# Synthetic tool result content for capped/missing tool calls
+SYNTHETIC_TOOL_RESULT = "Tool no ejecutada: límite de herramientas alcanzado. Continuá la entrevista con el contexto que ya tenés."
+
+
 class LLMClient:
     """OpenAI-compatible LLM client using urllib."""
     
@@ -276,7 +280,7 @@ def repair_tool_pairs(messages: list[dict]) -> list[dict]:
                 result.append({
                     "role": "tool",
                     "tool_call_id": missing_id,
-                    "content": "Tool no ejecutada: límite de herramientas alcanzado. Continuá la entrevista con el contexto que ya tenés."
+                    "content": SYNTHETIC_TOOL_RESULT
                 })
             
             # Don't increment i, we already advanced past tool messages
@@ -606,7 +610,7 @@ def run_generic_interview(
                         messages.append({
                             "role": "tool",
                             "tool_call_id": tool_call["id"],
-                            "content": "Tool no ejecutada: límite de herramientas alcanzado. Continuá la entrevista con el contexto que ya tenés."
+                            "content": SYNTHETIC_TOOL_RESULT
                         })
                     
                     # Now append the user warning
