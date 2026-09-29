@@ -4,7 +4,7 @@
 
 ## 🚧 En curso (WIP)
 
-_Nada por ahora._
+- [ ] [#9](https://github.com/mblasi/training/issues/9) Monorepo pnpm: apps/api, apps/admin, apps/mobile, packages/shared + CI · chore · @mblasi
 
 ## 👀 En revisión
 
@@ -19,7 +19,6 @@ _Nada por ahora._
 - [ ] [#12](https://github.com/mblasi/training/issues/12) Capa llm/ multi-proveedor (Nous Portal + Gemini) con rutas por agente y registro de llamadas · feat
 - [ ] [#11](https://github.com/mblasi/training/issues/11) Auth con Firebase (Google + email/password) en api, admin y mobile · feat
 - [ ] [#10](https://github.com/mblasi/training/issues/10) Postgres + pgvector local (Docker) + Drizzle + migraciones iniciales · feat
-- [ ] [#9](https://github.com/mblasi/training/issues/9) Monorepo pnpm: apps/api, apps/admin, apps/mobile, packages/shared + CI · chore
 
 ## ✅ Hecho
 
