@@ -4,12 +4,11 @@
 
 ## 🚧 En curso (WIP)
 
-- [ ] [#28](https://github.com/mblasi/training/issues/28) Harness: volver a RED desde GREEN cuando los tests de RED están mal + RED debe fallar por ausencia de código · fix · @mblasi
 - [ ] ⛔ [#10](https://github.com/mblasi/training/issues/10) Postgres + pgvector local (Docker) + Drizzle + migraciones iniciales · feat · @mblasi
 
 ## 👀 En revisión
 
-_Nada por ahora._
+- [ ] [#28](https://github.com/mblasi/training/issues/28) Harness: volver a RED desde GREEN cuando los tests de RED están mal + RED debe fallar por ausencia de código · fix · @mblasi
 
 ## 📋 Pendiente
 
