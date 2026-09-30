@@ -317,7 +317,7 @@ Crear 0000_enable_vector.sql manualmente (CREATE EXTENSION IF NOT EXISTS vector)
 - `apps/api/src/db/migrations/meta/_journal.json`
 
 **Progreso:**
-- [ ] RED: tests escritos y fallan
+- [x] RED: tests escritos y fallan
 - [ ] GREEN: tests pasan
 - [ ] REFACTOR: código limpio
 
