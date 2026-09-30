@@ -25,6 +25,22 @@ jobs:
   
   node:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.6-pg18
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: trainia_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/trainia_test
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -48,3 +64,27 @@ jobs:
       
       - name: Test
         run: pnpm test
+      
+      - name: Run migrations
+        run: pnpm --filter @trainia/api db:migrate
+      
+      - name: Seed database (first run)
+        run: pnpm --filter @trainia/api db:seed
+      
+      - name: Seed database (second run - idempotency check)
+        run: pnpm --filter @trainia/api db:seed
+      
+      - name: Run integration tests
+        run: pnpm --filter @trainia/api test:integration
+      
+      - name: Generate migrations (drift check)
+        run: pnpm --filter @trainia/api db:generate
+      
+      - name: Check for schema drift
+        run: |
+          git diff --exit-code apps/api/src/db/migrations/
+          if [ -n "$(git status --porcelain apps/api/src/db/migrations/)" ]; then
+            echo "Error: Untracked or modified files found in migrations/"
+            git status apps/api/src/db/migrations/
+            exit 1
+          fi

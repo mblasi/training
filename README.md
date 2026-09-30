@@ -31,6 +31,30 @@ API backend con Fastify. Servidor de desarrollo:
 corepack pnpm --filter ./apps/api dev
 ```
 
+#### Base de datos
+
+apps/api usa Postgres 18 con pgvector para almacenar usuarios, perfiles, proveedores LLM, rutas de agentes, llamadas y prompts.
+
+**Comandos DB:**
+
+```bash
+# Generar migraciones (después de cambiar schema)
+corepack pnpm --filter @trainia/api db:generate
+
+# Ejecutar migraciones
+corepack pnpm --filter @trainia/api db:migrate
+
+# Seed de datos iniciales (idempotente)
+corepack pnpm --filter @trainia/api db:seed
+
+# Tests de integración (requiere DATABASE_URL)
+corepack pnpm --filter @trainia/api test:integration
+```
+
+**Desarrollo local:**
+
+Ver `docker-compose.yml` en la raíz para referencia de cómo levantar Postgres localmente. Los tests de integración están configurados para CI únicamente hasta que se configure la DB de staging (issue #13).
+
 ### apps/admin
 
 Panel de administración React+Vite. Servidor de desarrollo:

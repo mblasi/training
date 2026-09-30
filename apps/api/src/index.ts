@@ -1,6 +1,11 @@
 import { buildApp } from './app.js';
+import { requireDatabaseUrl } from './db/env.js';
+import { createDb } from './db/client.js';
 
-const app = buildApp();
+const databaseUrl = requireDatabaseUrl(process.env);
+const { pool, db } = createDb(databaseUrl);
+
+const app = buildApp({ db: { pool, db } });
 
 const start = async () => {
   try {
