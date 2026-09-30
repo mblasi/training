@@ -214,7 +214,7 @@ Definir users(id uuid7, firebase_uid, email, role CHECK, locale, created_at) y p
 **Progreso:**
 - [x] RED: tests escritos y fallan
 - [x] GREEN: tests pasan
-- [ ] REFACTOR: código limpio
+- [x] REFACTOR: código limpio
 
 ### T6: Schema Drizzle: tablas llm_providers, llm_routes, llm_calls
 
