@@ -119,7 +119,7 @@ Agregar firebase-admin@14.5.0 a deps de api; crear src/auth/types.ts con AuthUse
 **Progreso:**
 - [x] RED: tests escritos y fallan
 - [x] GREEN: tests pasan
-- [ ] REFACTOR: código limpio
+- [x] REFACTOR: código limpio
 
 ### T3: API: verifyToken (función pura)
 
