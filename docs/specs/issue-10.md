@@ -239,7 +239,7 @@ Definir llm_providers(id uuid7, name CHECK, base_url, secret_ref, enabled), llm_
 
 **Progreso:**
 - [x] RED: tests escritos y fallan
-- [ ] GREEN: tests pasan
+- [x] GREEN: tests pasan
 - [ ] REFACTOR: código limpio
 
 ### T7: Schema Drizzle: tabla agent_prompts
