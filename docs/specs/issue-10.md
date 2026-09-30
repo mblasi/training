@@ -208,7 +208,7 @@ Definir users(id uuid7, firebase_uid, email, role CHECK, locale, created_at) y p
 - `apps/api/src/db/schema/index.ts`
 
 **Progreso:**
-- [x] RED: tests escritos y fallan
+- [ ] RED: tests escritos y fallan
 - [ ] GREEN: tests pasan
 - [ ] REFACTOR: código limpio
 
