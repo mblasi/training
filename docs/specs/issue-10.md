@@ -341,7 +341,7 @@ Modificar buildApp({ db }) con db requerido; /health ejecuta SELECT 1 via pool.q
 - `apps/api/src/index.ts`
 
 **Progreso:**
-- [ ] RED: tests escritos y fallan
+- [x] RED: tests escritos y fallan
 - [ ] GREEN: tests pasan
 - [ ] REFACTOR: código limpio
 
