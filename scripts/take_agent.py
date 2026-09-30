@@ -494,6 +494,26 @@ def mark_progress(spec_path: str, task_id: str, phase: str) -> None:
         f.write(content)
 
 
+def unmark_progress(spec_path: str, task_id: str, phase: str) -> None:
+    """
+    Unmark a phase (red/green/refactor) for a task (inverse of mark_progress).
+    
+    Args:
+        spec_path: Path to spec file
+        task_id: Task ID (e.g. "T1")
+        phase: "red", "green", or "refactor"
+    """
+    with open(spec_path, "r", encoding="utf-8") as f:
+        content = f.read()
+    
+    # Find the task section and uncheck
+    task_pattern = rf"(### {task_id}:.*?- \[)(x)\] ({phase.upper()}:)"
+    content = re.sub(task_pattern, r"\1 ] \3", content, flags=re.IGNORECASE | re.DOTALL)
+    
+    with open(spec_path, "w", encoding="utf-8") as f:
+        f.write(content)
+
+
 def run_design_phase(
     client: LLMClient,
     sandbox: ToolSandbox,

@@ -16,7 +16,7 @@ from typing import Any, Callable
 # Add scripts dir to path for imports
 sys.path.insert(0, str(Path(__file__).parent))
 
-from take_agent import parse_spec_markdown, set_status, mark_progress
+from take_agent import parse_spec_markdown, set_status, mark_progress, unmark_progress
 
 
 # Empty run detection patterns (compiled regexes, anchored at line start)
@@ -38,6 +38,9 @@ DEPENDENCY_INFRA_FILENAMES = {
 
 # Maximum /DESVIOs allowed per phase before stopping
 MAX_DESVIOS_PER_PHASE = 3
+
+# Sentinel value to signal back-to-RED from GREEN
+BACK_TO_RED = "back_to_red"
 
 
 def is_dependency_infra_file(path: str) -> bool:
@@ -259,6 +262,37 @@ def detect_desvio(output: str) -> str | None:
     return None
 
 
+def find_red_commit(repo_root: str, task: dict[str, Any], issue_num: int, run_cmd: Callable) -> str | None:
+    """
+    Find RED commit SHA for a task by searching git log.
+    
+    Searches for commit with message: "test: {task['title']} (#{issue_num})"
+    
+    Args:
+        repo_root: Repository root path
+        task: Task dict with 'title' field
+        issue_num: Issue number
+        run_cmd: Command runner function
+    
+    Returns:
+        SHA string (40 chars) if found, None otherwise
+    """
+    # Build expected commit message
+    expected_msg = f"test: {task['title']} (#{issue_num})"
+    
+    # Use --fixed-strings to avoid regex interpretation
+    result = run_cmd(
+        ["git", "log", "--format=%H", "-1", "--fixed-strings", "--grep", expected_msg],
+        cwd=repo_root,
+        timeout=5
+    )
+    
+    if result.returncode == 0 and result.stdout.strip():
+        return result.stdout.strip()
+    
+    return None
+
+
 def find_unremoved_tests(repo_root: str, task: dict[str, Any]) -> list[str]:
     """
     Find tests from task's tests_to_remove that still exist in their files.
@@ -470,6 +504,12 @@ def run_tdd_implementation(
     logs_dir = Path(repo_root) / ".backlog" / "runs" / f"issue-{issue_num}"
     logs_dir.mkdir(parents=True, exist_ok=True)
     
+    # Track back-to-RED per task (cap at 1 per run)
+    back_to_red_count = {}
+    
+    # Track RED commit SHAs for tasks (in-memory, filled when run_red_phase commits)
+    red_commits = {}
+    
     # Find first pending task
     for task in spec["tasks"]:
         task_id = task["id"]
@@ -504,13 +544,114 @@ def run_tdd_implementation(
                 )
                 if not success:
                     return False
+                
+                # Record RED commit SHA after successful RED
+                sha_result = run_cmd(["git", "rev-parse", "HEAD"], cwd=repo_root, timeout=5)
+                if sha_result.returncode == 0:
+                    red_commits[task_id] = sha_result.stdout.strip()
             
             elif phase == "green":
+                back_to_red_info = {}
                 success = run_green_phase(
                     repo_root, issue_num, task, spec, spec_path,
-                    test_cmd, logs_dir, coder, run_cmd, input_fn, print_fn
+                    test_cmd, logs_dir, coder, run_cmd, input_fn, print_fn,
+                    back_to_red_info
                 )
-                if not success:
+                
+                # Check if back-to-RED was triggered
+                if success == BACK_TO_RED:
+                    # Check cap
+                    if back_to_red_count.get(task_id, 0) >= 1:
+                        print_fn(f"\nError: la tarea {task_id} ya volvió a RED una vez en este run.")
+                        print_fn("No se puede volver a RED de nuevo para la misma tarea.")
+                        return False
+                    
+                    # Find RED commit
+                    red_sha = red_commits.get(task_id)
+                    if not red_sha:
+                        red_sha = find_red_commit(repo_root, task, issue_num, run_cmd)
+                    
+                    if not red_sha:
+                        print_fn(f"\nError: No encontré el commit de RED de {task_id}; no puedo volver a RED")
+                        return False
+                    
+                    # Revert RED commit
+                    print_fn(f"Revirtiendo commit de RED {red_sha[:8]}...")
+                    revert_result = run_cmd(["git", "revert", "--no-edit", red_sha], cwd=repo_root, timeout=10)
+                    
+                    if revert_result.returncode != 0:
+                        print_fn(f"Error al revertir RED commit:")
+                        print_fn(revert_result.stderr)
+                        return False
+                    
+                    # Unmark RED in spec
+                    unmark_progress(str(spec_path), task_id, "red")
+                    run_cmd(["git", "add", str(spec_path)], cwd=repo_root, timeout=5)
+                    run_cmd(
+                        ["git", "commit", "-m", f"docs: vuelta a RED de {task_id} (#{issue_num})"],
+                        cwd=repo_root,
+                        timeout=10
+                    )
+                    
+                    # Increment back-to-RED count
+                    back_to_red_count[task_id] = back_to_red_count.get(task_id, 0) + 1
+                    
+                    # Build feedback for RED
+                    desvio = back_to_red_info.get("desvio", "")
+                    decision = back_to_red_info.get("decision", "")
+                    feedback = f"Volviendo a RED por /DESVIO en GREEN:\n\n/DESVIO: {desvio}\n\nDecisión tomada: {decision}"
+                    
+                    # Rerun RED with feedback
+                    print_fn("\n=== Volviendo a RED ===\n")
+                    success = run_red_phase(
+                        repo_root, issue_num, task, spec, spec_path,
+                        test_cmd, logs_dir, coder, run_cmd, input_fn, print_fn,
+                        initial_feedback=feedback
+                    )
+                    if not success:
+                        return False
+                    
+                    # Record new RED commit SHA
+                    sha_result = run_cmd(["git", "rev-parse", "HEAD"], cwd=repo_root, timeout=5)
+                    if sha_result.returncode == 0:
+                        red_commits[task_id] = sha_result.stdout.strip()
+                    
+                    # Continue with GREEN and REFACTOR
+                    # GREEN phase
+                    print_fn("\n--- Fase GREEN (después de vuelta a RED) ---\n")
+                    back_to_red_info_2 = {}
+                    success = run_green_phase(
+                        repo_root, issue_num, task, spec, spec_path,
+                        test_cmd, logs_dir, coder, run_cmd, input_fn, print_fn,
+                        back_to_red_info_2
+                    )
+                    
+                    # After back-to-RED, no second back-to-RED allowed
+                    if success == BACK_TO_RED:
+                        print_fn(f"\nError: la tarea {task_id} ya volvió a RED una vez en este run.")
+                        print_fn("No se puede volver a RED de nuevo para la misma tarea.")
+                        return False
+                    
+                    if success is not True:
+                        return False
+                    
+                    # REFACTOR phase
+                    print_fn("\n--- Fase REFACTOR ---\n")
+                    success = run_refactor_phase(
+                        repo_root, issue_num, task, spec, spec_path,
+                        test_cmd, logs_dir, coder, run_cmd, input_fn, print_fn
+                    )
+                    if not success:
+                        return False
+                    
+                    # Task complete after back-to-RED flow
+                    break
+                
+                elif success is True:
+                    # GREEN succeeded normally, continue to REFACTOR
+                    pass
+                else:
+                    # GREEN failed
                     return False
             
             elif phase == "refactor":
@@ -549,16 +690,20 @@ def run_red_phase(
     coder: Callable,
     run_cmd: Callable,
     input_fn: Callable,
-    print_fn: Callable
+    print_fn: Callable,
+    initial_feedback: str | None = None
 ) -> bool:
     """
     Run RED phase: write tests that fail.
+    
+    Args:
+        initial_feedback: Optional feedback to include in first attempt (e.g. from back-to-RED)
     
     Returns True if successful, False otherwise.
     """
     task_id = task["id"]
     max_attempts = 2  # Initial + 1 retry
-    last_feedback = None
+    last_feedback = initial_feedback  # Start with initial feedback if provided
     last_decision = None  # Decision from last /DESVIO
     desvio_count = 0  # Track /DESVIO count for cap
     
@@ -737,16 +882,24 @@ def run_red_phase(
         if test_result.returncode == 0:
             print_fn("Error: tests pasaron en fase RED (deberían fallar)")
             
-            # First RED of the run: ask user if it's infrastructure error
+            # First RED of the run: ask user if it's infrastructure error or test problem
             if attempt == 0:
                 print_fn("\nOutput de tests:\n")
                 print_fn(test_result.stdout[-1000:] if len(test_result.stdout) > 1000 else test_result.stdout)
-                print_fn("\n¿Es esto un error de infraestructura (no un assert)? (y/n)")
+                print_fn("\n¿Es un error de infraestructura o de los propios tests? (y/n)")
                 is_infra = input_fn("> ").strip().lower()
                 
                 if is_infra == "y":
-                    print_fn("Error de infraestructura detectado. Abortando.")
-                    return False
+                    # Ask for optional comment
+                    comment = input_fn("Comentario para el coder (opcional): ").strip()
+                    if comment:
+                        last_feedback = comment
+                    print_fn("Error de infraestructura o tests detectado. Reintentando...")
+                    # Revert and retry
+                    if changed:
+                        revert_files(repo_root, changed, run_cmd)
+                    attempt += 1
+                    continue
             
             # Revert and retry
             if changed:
@@ -794,12 +947,19 @@ def run_green_phase(
     coder: Callable,
     run_cmd: Callable,
     input_fn: Callable,
-    print_fn: Callable
-) -> bool:
+    print_fn: Callable,
+    back_to_red_info: dict[str, Any] | None = None
+) -> bool | str:
     """
     Run GREEN phase: implement minimum to pass tests.
     
-    Returns True if successful, False otherwise.
+    Args:
+        back_to_red_info: Dict to fill with {desvio, decision} if back-to-RED triggered
+    
+    Returns:
+        True if successful
+        False if failed
+        BACK_TO_RED (str) if user wants to go back to RED
     """
     task_id = task["id"]
     max_attempts = 3
@@ -876,7 +1036,21 @@ def run_green_phase(
                 timeout=10
             )
             
-            print_fn("Decisión registrada. Reintentando fase GREEN...\n")
+            print_fn("Decisión registrada.")
+            
+            # Ask if problem is in RED tests
+            back_to_red_response = input_fn("¿El problema está en los tests de RED? (volver-a-red/no): ").strip().lower()
+            
+            if back_to_red_response == "volver-a-red":
+                # Store info for caller
+                if back_to_red_info is not None:
+                    back_to_red_info["desvio"] = desvio
+                    back_to_red_info["decision"] = decision
+                
+                return BACK_TO_RED
+            
+            # Otherwise retry GREEN with decision
+            print_fn("Reintentando fase GREEN...\n")
             
             # Store decision for next prompt, DO NOT consume attempt
             last_decision = decision
@@ -1175,11 +1349,13 @@ def build_red_prompt(spec: dict[str, Any], task: dict[str, Any]) -> str:
                 lines.append(f"   - `{impl_file}`")
             rule_num += 1
     
+    lines.append(f"{rule_num}. Los tests deben fallar PORQUE FALTA el código de producción de esta tarea (import o assert sobre ese código), nunca por usar mal la API de una librería, del framework de tests o por errores del propio test.")
+    rule_num += 1
+    lines.append(f"{rule_num}. Antes de escribir asserts sobre una librería, verificá su API real en la versión instalada (tipos .d.ts en node_modules, o el código fuente) — no asumas la forma de los objetos.")
+    rule_num += 1
     lines.append(f"{rule_num}. Si un test de la lista ya existe en el archivo, modificalo para que cumpla lo indicado (no dupliques)")
     rule_num += 1
     lines.append(f"{rule_num}. Leé los tests existentes de los archivos que tocás: si alguno NO listado contradice esta tarea o las decisiones acordadas, escribí `/DESVIO <test y contradicción>` y frená; no lo cambies en silencio ni lo dejes")
-    rule_num += 1
-    lines.append(f"{rule_num}. Los tests deben FALLAR (assert o NotImplementedError)")
     rule_num += 1
     lines.append(f"{rule_num}. Si necesitás tomar una decisión no prevista, escribí una línea `/DESVIO <explicación>` y frená")
     
