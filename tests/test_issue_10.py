@@ -261,6 +261,264 @@ class TestIssue10Task9(unittest.TestCase):
         )
 
 
+class TestIssue10Task12(unittest.TestCase):
+    """Tests para T12: CI: service container + steps integración + drift check + db.integration.test.ts + README."""
+
+    @classmethod
+    def setUpClass(cls):
+        """Setup común: obtener la raíz del repo."""
+        cls.repo_root = Path(__file__).parent.parent
+        cls.ci_file = cls.repo_root / ".github" / "workflows" / "ci.yml"
+        cls.integration_test_file = cls.repo_root / "apps" / "api" / "test" / "db.integration.test.ts"
+        cls.readme_file = cls.repo_root / "README.md"
+
+    def test_ci_has_postgres_service_container(self):
+        """ci.yml contiene 'pgvector/pgvector:0.8.6-pg18' bajo services."""
+        self.assertTrue(
+            self.ci_file.exists(),
+            ".github/workflows/ci.yml debe existir"
+        )
+
+        with open(self.ci_file, 'r') as f:
+            ci_data = yaml.safe_load(f)
+
+        # Verificar que el job 'node' tenga services con pgvector
+        jobs = ci_data.get('jobs', {})
+        self.assertIn(
+            'node',
+            jobs,
+            "ci.yml debe tener un job 'node'"
+        )
+
+        node_job = jobs['node']
+        services = node_job.get('services', {})
+        
+        # Buscar algún servicio que use la imagen pgvector
+        found = False
+        for service_name, service_config in services.items():
+            image = service_config.get('image', '')
+            if 'pgvector/pgvector:0.8.6-pg18' in image:
+                found = True
+                break
+        
+        self.assertTrue(
+            found,
+            "ci.yml job 'node' debe tener un servicio con imagen 'pgvector/pgvector:0.8.6-pg18'"
+        )
+
+    def test_ci_has_database_url_env(self):
+        """ci.yml contiene DATABASE_URL con referencia a localhost y 5432."""
+        self.assertTrue(
+            self.ci_file.exists(),
+            ".github/workflows/ci.yml debe existir"
+        )
+
+        with open(self.ci_file, 'r') as f:
+            ci_data = yaml.safe_load(f)
+
+        # Verificar que el job 'node' tenga env con DATABASE_URL
+        jobs = ci_data.get('jobs', {})
+        self.assertIn(
+            'node',
+            jobs,
+            "ci.yml debe tener un job 'node'"
+        )
+
+        node_job = jobs['node']
+        env = node_job.get('env', {})
+        
+        self.assertIn(
+            'DATABASE_URL',
+            env,
+            "ci.yml job 'node' debe tener DATABASE_URL en env"
+        )
+
+        database_url = env['DATABASE_URL']
+        self.assertIn(
+            'localhost',
+            database_url,
+            "DATABASE_URL debe contener 'localhost'"
+        )
+        self.assertIn(
+            '5432',
+            database_url,
+            "DATABASE_URL debe contener '5432'"
+        )
+
+    def test_ci_runs_db_migrate(self):
+        """ci.yml contiene step con 'db:migrate'."""
+        self.assertTrue(
+            self.ci_file.exists(),
+            ".github/workflows/ci.yml debe existir"
+        )
+
+        with open(self.ci_file, 'r') as f:
+            ci_data = yaml.safe_load(f)
+
+        # Verificar que el job 'node' tenga un step que ejecute db:migrate
+        jobs = ci_data.get('jobs', {})
+        self.assertIn(
+            'node',
+            jobs,
+            "ci.yml debe tener un job 'node'"
+        )
+
+        node_job = jobs['node']
+        steps = node_job.get('steps', [])
+        
+        found = False
+        for step in steps:
+            run = step.get('run', '')
+            if 'db:migrate' in run:
+                found = True
+                break
+        
+        self.assertTrue(
+            found,
+            "ci.yml job 'node' debe tener un step que ejecute 'db:migrate'"
+        )
+
+    def test_ci_runs_test_integration(self):
+        """ci.yml contiene step con 'test:integration'."""
+        self.assertTrue(
+            self.ci_file.exists(),
+            ".github/workflows/ci.yml debe existir"
+        )
+
+        with open(self.ci_file, 'r') as f:
+            ci_data = yaml.safe_load(f)
+
+        # Verificar que el job 'node' tenga un step que ejecute test:integration
+        jobs = ci_data.get('jobs', {})
+        self.assertIn(
+            'node',
+            jobs,
+            "ci.yml debe tener un job 'node'"
+        )
+
+        node_job = jobs['node']
+        steps = node_job.get('steps', [])
+        
+        found = False
+        for step in steps:
+            run = step.get('run', '')
+            if 'test:integration' in run:
+                found = True
+                break
+        
+        self.assertTrue(
+            found,
+            "ci.yml job 'node' debe tener un step que ejecute 'test:integration'"
+        )
+
+    def test_ci_runs_drizzle_generate_and_drift_check(self):
+        """ci.yml contiene 'db:generate' y 'git diff --exit-code'."""
+        self.assertTrue(
+            self.ci_file.exists(),
+            ".github/workflows/ci.yml debe existir"
+        )
+
+        with open(self.ci_file, 'r') as f:
+            ci_data = yaml.safe_load(f)
+
+        # Verificar que el job 'node' tenga steps que ejecuten db:generate y git diff
+        jobs = ci_data.get('jobs', {})
+        self.assertIn(
+            'node',
+            jobs,
+            "ci.yml debe tener un job 'node'"
+        )
+
+        node_job = jobs['node']
+        steps = node_job.get('steps', [])
+        
+        found_generate = False
+        found_drift_check = False
+        
+        for step in steps:
+            run = step.get('run', '')
+            if 'db:generate' in run:
+                found_generate = True
+            if 'git diff --exit-code' in run:
+                found_drift_check = True
+        
+        self.assertTrue(
+            found_generate,
+            "ci.yml job 'node' debe tener un step que ejecute 'db:generate'"
+        )
+        self.assertTrue(
+            found_drift_check,
+            "ci.yml job 'node' debe tener un step que ejecute 'git diff --exit-code'"
+        )
+
+    def test_ci_python_job_untouched(self):
+        """ci.yml sigue teniendo job 'test' con python-version '3.12'."""
+        self.assertTrue(
+            self.ci_file.exists(),
+            ".github/workflows/ci.yml debe existir"
+        )
+
+        with open(self.ci_file, 'r') as f:
+            ci_data = yaml.safe_load(f)
+
+        # Verificar que el job 'test' siga existiendo
+        jobs = ci_data.get('jobs', {})
+        self.assertIn(
+            'test',
+            jobs,
+            "ci.yml debe tener un job 'test'"
+        )
+
+        test_job = jobs['test']
+        steps = test_job.get('steps', [])
+        
+        # Buscar el step de Setup Python
+        found = False
+        for step in steps:
+            if step.get('name') == 'Setup Python':
+                with_config = step.get('with', {})
+                python_version = with_config.get('python-version', '')
+                if python_version == '3.12':
+                    found = True
+                    break
+        
+        self.assertTrue(
+            found,
+            "ci.yml job 'test' debe tener un step 'Setup Python' con python-version '3.12'"
+        )
+
+    def test_integration_test_file_exists(self):
+        """apps/api/test/db.integration.test.ts existe."""
+        self.assertTrue(
+            self.integration_test_file.exists(),
+            "apps/api/test/db.integration.test.ts debe existir"
+        )
+
+    def test_readme_has_db_section(self):
+        """README.md contiene una sección sobre la base de datos."""
+        self.assertTrue(
+            self.readme_file.exists(),
+            "README.md debe existir"
+        )
+
+        content = self.readme_file.read_text()
+        
+        # Verificar que contenga referencias a la base de datos
+        # Buscamos palabras clave relacionadas con DB
+        db_keywords = ['database', 'postgres', 'db:', 'migracion', 'migration', 'seed']
+        
+        found = False
+        for keyword in db_keywords:
+            if keyword.lower() in content.lower():
+                found = True
+                break
+        
+        self.assertTrue(
+            found,
+            "README.md debe contener una sección sobre la base de datos con información de comandos DB"
+        )
+
+
 class TestIssue10Task11(unittest.TestCase):
     """Tests para T11: docker-compose.yml + tests Python estructurales."""
 

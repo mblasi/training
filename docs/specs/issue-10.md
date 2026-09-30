@@ -389,7 +389,7 @@ Modificar ci.yml: service container pgvector en job node con DATABASE_URL, steps
 - `README.md`
 
 **Progreso:**
-- [ ] RED: tests escritos y fallan
+- [x] RED: tests escritos y fallan
 - [ ] GREEN: tests pasan
 - [ ] REFACTOR: código limpio
 
