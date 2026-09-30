@@ -117,7 +117,7 @@ Agregar firebase-admin@14.5.0 a deps de api; crear src/auth/types.ts con AuthUse
 - `pnpm-lock.yaml`
 
 **Progreso:**
-- [ ] RED: tests escritos y fallan
+- [x] RED: tests escritos y fallan
 - [ ] GREEN: tests pasan
 - [ ] REFACTOR: código limpio
 

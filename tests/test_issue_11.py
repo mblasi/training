@@ -111,5 +111,50 @@ class TestIssue11Task1(unittest.TestCase):
         )
 
 
+class TestIssue11Task2(unittest.TestCase):
+    """Tests para T2: tipos de auth + requireFirebaseProjectId + firebase-admin dep."""
+
+    @classmethod
+    def setUpClass(cls):
+        """Setup común: obtener la raíz del repo."""
+        cls.repo_root = Path(__file__).parent.parent
+        cls.api_package_json = cls.repo_root / "apps" / "api" / "package.json"
+
+    def test_api_package_json_has_firebase_admin(self):
+        """apps/api/package.json dependencies contiene 'firebase-admin' con versión '14.5.0'."""
+        self.assertTrue(
+            self.api_package_json.exists(),
+            "apps/api/package.json debe existir"
+        )
+
+        with open(self.api_package_json, 'r') as f:
+            pkg = json.load(f)
+
+        self.assertIn(
+            'dependencies',
+            pkg,
+            "apps/api/package.json debe contener campo 'dependencies'"
+        )
+
+        dependencies = pkg['dependencies']
+        self.assertIsInstance(
+            dependencies,
+            dict,
+            "'dependencies' debe ser un objeto"
+        )
+
+        self.assertIn(
+            'firebase-admin',
+            dependencies,
+            "dependencies debe contener 'firebase-admin'"
+        )
+
+        self.assertEqual(
+            dependencies['firebase-admin'],
+            '14.5.0',
+            "firebase-admin debe ser versión '14.5.0'"
+        )
+
+
 if __name__ == '__main__':
     unittest.main()
