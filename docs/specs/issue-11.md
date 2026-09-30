@@ -140,7 +140,7 @@ Crear src/auth/verifyToken.ts que llama auth.verifyIdToken(token) y retorna el d
 **Progreso:**
 - [x] RED: tests escritos y fallan
 - [x] GREEN: tests pasan
-- [ ] REFACTOR: código limpio
+- [x] REFACTOR: código limpio
 
 ### T4: API: upsertUser con lógica ADMIN_EMAILS
 
