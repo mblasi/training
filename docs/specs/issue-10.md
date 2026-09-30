@@ -293,7 +293,7 @@ Crear seed.ts exportando constantes SEED_PROVIDERS (nous, gemini) y SEED_ROUTES 
 
 **Progreso:**
 - [x] RED: tests escritos y fallan
-- [ ] GREEN: tests pasan
+- [x] GREEN: tests pasan
 - [ ] REFACTOR: código limpio
 
 ### T9: Migraciones SQL: 0000_enable_vector.sql + 0001_core.sql + meta/
