@@ -33,7 +33,12 @@ describe('Database integration', () => {
     await runSeed(db.db);
     
     // Verify that providers and routes exist
-    // This will be implemented in GREEN
-    expect(true).toBe(false);
+    const { llmProviders, llmRoutes } = await import('../src/db/schema/index.js');
+    
+    const providers = await db.db.select().from(llmProviders);
+    expect(providers.length).toBeGreaterThanOrEqual(2);
+    
+    const routes = await db.db.select().from(llmRoutes);
+    expect(routes.length).toBeGreaterThanOrEqual(7);
   });
 });
