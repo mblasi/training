@@ -4,11 +4,11 @@
 
 ## 🚧 En curso (WIP)
 
-- [ ] [#10](https://github.com/mblasi/training/issues/10) Postgres + pgvector local (Docker) + Drizzle + migraciones iniciales · feat · @mblasi
+_Nada por ahora._
 
 ## 👀 En revisión
 
-_Nada por ahora._
+- [ ] [#10](https://github.com/mblasi/training/issues/10) Postgres + pgvector local (Docker) + Drizzle + migraciones iniciales · feat · @mblasi
 
 ## 📋 Pendiente
 
