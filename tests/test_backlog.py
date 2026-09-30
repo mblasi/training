@@ -572,33 +572,50 @@ class TestMergeAbort(unittest.TestCase):
         with unittest.mock.patch.object(backlog, 'run_command') as mock_run:
             with unittest.mock.patch.object(backlog, 'ask') as mock_ask:
                 with unittest.mock.patch.object(backlog, 'get_default_branch', return_value='main'):
-                    # Setup mocks with proper result objects
-                    pr_result = unittest.mock.MagicMock()
-                    pr_result.stdout = '[{"number": 42, "url": "http://test", "headRefName": "issue/7-test"}]'
-                    
-                    checks_result = unittest.mock.MagicMock()
-                    checks_result.stdout = 'Some checks failed\nFAIL: test'
-                    
-                    merge_result = unittest.mock.MagicMock()
-                    merge_result.stdout = ''
-                    
-                    checkout_result = unittest.mock.MagicMock()
-                    checkout_result.stdout = ''
-                    
-                    pull_result = unittest.mock.MagicMock()
-                    pull_result.stdout = ''
-                    
-                    mock_run.side_effect = [pr_result, checks_result, merge_result, checkout_result, pull_result]
-                    
-                    args = unittest.mock.MagicMock()
-                    args.issue = 7
-                    args.force = True
-                    
-                    # Should NOT exit, should proceed with merge
-                    backlog.cmd_merge(args)
-                    
-                    # ask() should NOT have been called
-                    mock_ask.assert_not_called()
+                    with unittest.mock.patch('builtins.print'):
+                        # Setup mocks with proper result objects
+                        pr_result = unittest.mock.MagicMock()
+                        pr_result.stdout = '[{"number": 42, "url": "http://test", "headRefName": "issue/7-test"}]'
+                        
+                        checks_result = unittest.mock.MagicMock()
+                        checks_result.stdout = 'Some checks failed\nFAIL: test'
+                        
+                        merge_result = unittest.mock.MagicMock()
+                        merge_result.stdout = ''
+                        
+                        # New: gh issue view (from finalize_issue_after_merge)
+                        issue_view_result = unittest.mock.MagicMock()
+                        issue_view_result.stdout = '{"state": "CLOSED", "labels": [{"name": "status:review"}]}'
+                        
+                        # New: gh issue edit --remove-label (from finalize_issue_after_merge)
+                        issue_edit_result = unittest.mock.MagicMock()
+                        issue_edit_result.stdout = ''
+                        
+                        checkout_result = unittest.mock.MagicMock()
+                        checkout_result.stdout = ''
+                        
+                        pull_result = unittest.mock.MagicMock()
+                        pull_result.stdout = ''
+                        
+                        mock_run.side_effect = [
+                            pr_result,
+                            checks_result,
+                            merge_result,
+                            issue_view_result,
+                            issue_edit_result,
+                            checkout_result,
+                            pull_result
+                        ]
+                        
+                        args = unittest.mock.MagicMock()
+                        args.issue = 7
+                        args.force = True
+                        
+                        # Should NOT exit, should proceed with merge
+                        backlog.cmd_merge(args)
+                        
+                        # ask() should NOT have been called
+                        mock_ask.assert_not_called()
 
 
 if __name__ == "__main__":

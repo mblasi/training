@@ -224,8 +224,9 @@ Este comando:
 - Encuentra el PR asociado al issue
 - Verifica que los checks pasen (o pide confirmación)
 - Hace squash merge y borra la rama
+- Limpia el estado del issue: quita los labels `status:*` y `blocked`, y lo cierra si todavía estaba abierto
 - Vuelve a `main` y hace pull
-- El issue se cierra automáticamente por "Closes #N"
+- El issue queda cerrado sin labels de estado
 
 ## Comandos útiles
 
