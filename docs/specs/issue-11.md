@@ -89,7 +89,7 @@ Crear firebase.json mínimo con emulators.auth port 9099 y agregar firebase-tool
 - `pnpm-lock.yaml`
 
 **Progreso:**
-- [ ] RED: tests escritos y fallan
+- [x] RED: tests escritos y fallan
 - [ ] GREEN: tests pasan
 - [ ] REFACTOR: código limpio
 
