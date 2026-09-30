@@ -110,7 +110,7 @@ Modificar healthStatusSchema: status z.enum(['ok','degraded']), db z.enum(['ok',
 **Progreso:**
 - [x] RED: tests escritos y fallan
 - [x] GREEN: tests pasan
-- [ ] REFACTOR: código limpio
+- [x] REFACTOR: código limpio
 
 ### T2: Agregar deps Drizzle+pg a apps/api + drizzle.config.ts + vitest configs
 
