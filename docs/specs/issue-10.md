@@ -262,7 +262,7 @@ Definir agent_prompts(id uuid7, agent, version int, content text, status CHECK d
 
 **Progreso:**
 - [x] RED: tests escritos y fallan
-- [ ] GREEN: tests pasan
+- [x] GREEN: tests pasan
 - [ ] REFACTOR: código limpio
 
 ### T8: Seed: SEED_PROVIDERS, SEED_ROUTES, runSeed(db)
