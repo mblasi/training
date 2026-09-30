@@ -8,6 +8,7 @@ de DB estén configurados, y que existan los archivos de configuración necesari
 import json
 import unittest
 from pathlib import Path
+import yaml
 
 
 class TestIssue10Task2(unittest.TestCase):
@@ -258,6 +259,152 @@ class TestIssue10Task9(unittest.TestCase):
             2,
             "_journal.json debe tener exactamente 2 entries (0000 y 0001)"
         )
+
+
+class TestIssue10Task11(unittest.TestCase):
+    """Tests para T11: docker-compose.yml + tests Python estructurales."""
+
+    @classmethod
+    def setUpClass(cls):
+        """Setup común: obtener la raíz del repo."""
+        cls.repo_root = Path(__file__).parent.parent
+        cls.docker_compose_file = cls.repo_root / "docker-compose.yml"
+
+    def test_docker_compose_exists(self):
+        """docker-compose.yml existe en la raíz del repo."""
+        self.assertTrue(
+            self.docker_compose_file.exists(),
+            "docker-compose.yml debe existir en la raíz del repo"
+        )
+
+    def test_docker_compose_uses_pgvector_pg18_image(self):
+        """docker-compose.yml contiene 'pgvector/pgvector:0.8.6-pg18'."""
+        self.assertTrue(
+            self.docker_compose_file.exists(),
+            "docker-compose.yml debe existir para verificar su contenido"
+        )
+
+        with open(self.docker_compose_file, 'r') as f:
+            compose_data = yaml.safe_load(f)
+
+        # Buscar el servicio postgres y verificar que use la imagen correcta
+        services = compose_data.get('services', {})
+        
+        # Buscar cualquier servicio que use la imagen pgvector
+        found = False
+        for service_name, service_config in services.items():
+            image = service_config.get('image', '')
+            if 'pgvector/pgvector:0.8.6-pg18' in image:
+                found = True
+                break
+        
+        self.assertTrue(
+            found,
+            "docker-compose.yml debe contener un servicio con imagen 'pgvector/pgvector:0.8.6-pg18'"
+        )
+
+    def test_docker_compose_exposes_5432(self):
+        """docker-compose.yml contiene '5432'."""
+        self.assertTrue(
+            self.docker_compose_file.exists(),
+            "docker-compose.yml debe existir para verificar su contenido"
+        )
+
+        with open(self.docker_compose_file, 'r') as f:
+            compose_data = yaml.safe_load(f)
+
+        # Buscar el puerto 5432 en algún servicio
+        services = compose_data.get('services', {})
+        
+        found = False
+        for service_name, service_config in services.items():
+            ports = service_config.get('ports', [])
+            for port in ports:
+                if '5432' in str(port):
+                    found = True
+                    break
+            if found:
+                break
+        
+        self.assertTrue(
+            found,
+            "docker-compose.yml debe contener el puerto 5432 en algún servicio"
+        )
+
+    def test_docker_compose_has_healthcheck_pg_isready(self):
+        """docker-compose.yml contiene 'healthcheck' y 'pg_isready'."""
+        self.assertTrue(
+            self.docker_compose_file.exists(),
+            "docker-compose.yml debe existir para verificar su contenido"
+        )
+
+        with open(self.docker_compose_file, 'r') as f:
+            compose_data = yaml.safe_load(f)
+
+        # Buscar healthcheck con pg_isready en algún servicio
+        services = compose_data.get('services', {})
+        
+        found_healthcheck = False
+        found_pg_isready = False
+        
+        for service_name, service_config in services.items():
+            healthcheck = service_config.get('healthcheck', {})
+            if healthcheck:
+                found_healthcheck = True
+                # Verificar que el healthcheck contenga pg_isready
+                test = healthcheck.get('test', '')
+                if isinstance(test, list):
+                    test = ' '.join(test)
+                if 'pg_isready' in str(test):
+                    found_pg_isready = True
+                    break
+        
+        self.assertTrue(
+            found_healthcheck,
+            "docker-compose.yml debe contener 'healthcheck' en algún servicio"
+        )
+        self.assertTrue(
+            found_pg_isready,
+            "docker-compose.yml healthcheck debe contener 'pg_isready'"
+        )
+
+    def test_docker_compose_has_postgres_env_vars(self):
+        """docker-compose.yml contiene POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB."""
+        self.assertTrue(
+            self.docker_compose_file.exists(),
+            "docker-compose.yml debe existir para verificar su contenido"
+        )
+
+        with open(self.docker_compose_file, 'r') as f:
+            compose_data = yaml.safe_load(f)
+
+        # Buscar variables de entorno de Postgres en algún servicio
+        services = compose_data.get('services', {})
+        
+        required_env_vars = ['POSTGRES_USER', 'POSTGRES_PASSWORD', 'POSTGRES_DB']
+        found_env_vars = set()
+        
+        for service_name, service_config in services.items():
+            environment = service_config.get('environment', {})
+            
+            # environment puede ser dict o lista
+            if isinstance(environment, dict):
+                env_keys = environment.keys()
+            elif isinstance(environment, list):
+                env_keys = [item.split('=')[0] for item in environment]
+            else:
+                continue
+            
+            for env_var in required_env_vars:
+                if env_var in env_keys:
+                    found_env_vars.add(env_var)
+        
+        for env_var in required_env_vars:
+            self.assertIn(
+                env_var,
+                found_env_vars,
+                f"docker-compose.yml debe contener la variable de entorno '{env_var}'"
+            )
 
 
 if __name__ == '__main__':
