@@ -319,7 +319,7 @@ Crear 0000_enable_vector.sql manualmente (CREATE EXTENSION IF NOT EXISTS vector)
 **Progreso:**
 - [x] RED: tests escritos y fallan
 - [x] GREEN: tests pasan
-- [ ] REFACTOR: código limpio
+- [x] REFACTOR: código limpio
 
 ### T10: /health con chequeo DB — unit tests con mock de db
 
