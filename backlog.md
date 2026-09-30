@@ -8,7 +8,7 @@ _Nada por ahora._
 
 ## 👀 En revisión
 
-- [ ] [#31](https://github.com/mblasi/training/issues/31) Harness: merge deja status:review en issues cerrados · fix · @mblasi
+_Nada por ahora._
 
 ## 📋 Pendiente
 
@@ -21,6 +21,7 @@ _Nada por ahora._
 
 ## ✅ Hecho
 
+- [x] [#31](https://github.com/mblasi/training/issues/31) Harness: merge deja status:review en issues cerrados · fix · @mblasi
 - [x] [#10](https://github.com/mblasi/training/issues/10) Postgres + pgvector local (Docker) + Drizzle + migraciones iniciales · feat · @mblasi
 - [x] [#28](https://github.com/mblasi/training/issues/28) Harness: volver a RED desde GREEN cuando los tests de RED están mal + RED debe fallar por ausencia de código · fix · @mblasi
 - [x] [#26](https://github.com/mblasi/training/issues/26) Harness: tests existentes que contradicen la spec traban GREEN (tests_to_remove + revisión en RED) · fix · @mblasi
