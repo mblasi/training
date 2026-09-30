@@ -177,7 +177,7 @@ Crear apps/api/src/db/client.ts con createDb(url: string): { pool: Pool, db }; t
 - `apps/api/src/db/client.ts`
 
 **Progreso:**
-- [ ] RED: tests escritos y fallan
+- [x] RED: tests escritos y fallan
 - [ ] GREEN: tests pasan
 - [ ] REFACTOR: código limpio
 
