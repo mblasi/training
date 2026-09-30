@@ -15,6 +15,7 @@
   "devDependencies": {
     "eslint": "^10.0.0",
     "eslint-config-prettier": "^10.1.8",
+    "firebase-tools": "15.32.0",
     "typescript-eslint": "^8.71.0"
   }
 }

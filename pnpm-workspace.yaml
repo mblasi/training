@@ -4,6 +4,8 @@ packages:
 allowBuilds:
   esbuild: true
   unrs-resolver: true
+  protobufjs: true
+  re2: true
 minimumReleaseAgeExclude:
   - '@expo/ui@57.0.21'
   - expo-constants@57.0.20

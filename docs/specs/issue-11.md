@@ -91,7 +91,7 @@ Crear firebase.json mínimo con emulators.auth port 9099 y agregar firebase-tool
 
 **Progreso:**
 - [x] RED: tests escritos y fallan
-- [ ] GREEN: tests pasan
+- [x] GREEN: tests pasan
 - [ ] REFACTOR: código limpio
 
 ### T2: API: tipos de auth + requireFirebaseProjectId + firebase-admin dep
