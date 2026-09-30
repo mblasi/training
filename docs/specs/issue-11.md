@@ -138,7 +138,7 @@ Crear src/auth/verifyToken.ts que llama auth.verifyIdToken(token) y retorna el d
 - `apps/api/src/auth/verifyToken.ts`
 
 **Progreso:**
-- [ ] RED: tests escritos y fallan
+- [x] RED: tests escritos y fallan
 - [ ] GREEN: tests pasan
 - [ ] REFACTOR: código limpio
 
