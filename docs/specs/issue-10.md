@@ -84,7 +84,10 @@ Modificar healthStatusSchema: status z.enum(['ok','degraded']), db z.enum(['ok',
 - `apps/mobile/test/health.test.ts::parseHealthResponse throws on invalid data`: fixture sin db lanza
 - `packages/shared/test/health.test.ts::test_healthstatus_parse_valid_object`: (test existente, D16) actualizar el fixture para incluir db:'ok'; parse no lanza
 - `apps/api/test/health.test.ts::test_get_health_returns_503_degraded_without_db_client`: (D16) GET /health → statusCode 503, body.status === 'degraded', body.db === 'error'
-- `apps/api/test/health.test.ts::test_get_health_body_matches_healthstatus_schema`: (test existente, D16) actualizar: body parseado con healthStatusSchema no lanza e incluye db
+- `apps/api/test/health.test.ts::test_get_health_body_matches_healthstatus_schema`: (test existente, D16, modificar) body parseado con healthStatusSchema no lanza; parsed.status === 'degraded' y parsed.db === 'error'
+
+**Tests a eliminar:**
+- `apps/api/test/health.test.ts::test_get_health_returns_200`: D16 — sin cliente de DB /health responde 503; reemplazado por test_get_health_returns_503_degraded_without_db_client
 
 **Archivos de soporte de tests:**
 - `apps/api/package.json`
