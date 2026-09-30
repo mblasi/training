@@ -343,7 +343,7 @@ Modificar buildApp({ db }) con db requerido; /health ejecuta SELECT 1 via pool.q
 **Progreso:**
 - [x] RED: tests escritos y fallan
 - [x] GREEN: tests pasan
-- [ ] REFACTOR: código limpio
+- [x] REFACTOR: código limpio
 
 ### T11: docker-compose.yml + tests Python estructurales
 
