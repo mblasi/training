@@ -337,22 +337,18 @@ class TestBackToRedEndToEnd(unittest.TestCase):
     
     def test_back_to_red_full_flow(self):
         """Test RED commits wrong test, GREEN /DESVIO + back-to-RED, then success."""
-        call_count = {"red": 0, "green": 0}
+        # Use phase markers instead of simple counters
+        phase_calls = []
         
         def fake_coder(prompt: str, log_path: str) -> tuple[int, str]:
-            # Debug: print log_path
-            outputs.append(f"DEBUG: fake_coder called with log_path={log_path}")
-            
-            if "red" in log_path.lower():
-                call_count["red"] += 1
+            # Branch ONLY on prompt content, not on file existence
+            if "Fase RED" in prompt:
+                red_num = len([p for p in phase_calls if p == "red"]) + 1
+                phase_calls.append("red")
                 
-                # Check if test file exists and read it
-                test_file = self.repo / "tests" / "test_calc.py"
-                current_test = test_file.read_text() if test_file.exists() else ""
-                
-                if "999" not in current_test:
-                    # First RED: write test that can never pass (wrong)
-                    test_file.write_text(
+                if red_num == 1:
+                    # First RED: write test that expects 999 (wrong)
+                    (self.repo / "tests" / "test_calc.py").write_text(
                         "import unittest\n"
                         "from src.calc import add\n\n"
                         "class TestCalc(unittest.TestCase):\n"
@@ -360,13 +356,13 @@ class TestBackToRedEndToEnd(unittest.TestCase):
                         "        self.assertEqual(add(2, 3), 999)  # Wrong!\n"
                     )
                     return 0, "Tests written (wrong)"
-                else:
-                    # Second RED (after back-to-RED): write correct test
-                    feedback_present = "/DESVIO" in prompt and "el test está mal" in prompt
-                    if not feedback_present:
+                elif red_num == 2:
+                    # Second RED (after back-to-RED): verify feedback present
+                    if "/DESVIO" not in prompt or "el test está mal" not in prompt:
                         return 1, "ERROR: Second RED prompt missing /DESVIO feedback"
                     
-                    test_file.write_text(
+                    # Write correct test
+                    (self.repo / "tests" / "test_calc.py").write_text(
                         "import unittest\n"
                         "from src.calc import add\n\n"
                         "class TestCalc(unittest.TestCase):\n"
@@ -374,45 +370,47 @@ class TestBackToRedEndToEnd(unittest.TestCase):
                         "        self.assertEqual(add(2, 3), 5)  # Correct\n"
                     )
                     return 0, "Tests written (correct)"
-            
-            elif "green" in log_path.lower():
-                # Check if test expects 999 or 5
-                test_file = self.repo / "tests" / "test_calc.py"
-                if not test_file.exists():
-                    call_count["green"] += 1
-                    return 1, f"ERROR: Test file doesn't exist in GREEN #{call_count['green']}, repo={self.repo}"
-                
-                current_test = test_file.read_text()
-                call_count["green"] += 1
-                
-                if "999" in current_test:
-                    # Test still expects 999 - return /DESVIO
-                    return 0, "/DESVIO el test está mal, espera 999 pero debería esperar 5"
                 else:
-                    # Test expects 5 (after back-to-RED) - implement
+                    return 1, f"ERROR: Unexpected RED call #{red_num}"
+            
+            elif "Fase GREEN" in prompt:
+                green_num = len([p for p in phase_calls if p == "green"]) + 1
+                phase_calls.append("green")
+                
+                if green_num == 1:
+                    # First GREEN: detect wrong test and return /DESVIO
+                    return 0, "/DESVIO el test está mal, espera 999 pero debería esperar 5"
+                elif green_num == 2:
+                    # Second GREEN (after back-to-RED): implement correctly
                     (self.repo / "src" / "calc.py").write_text(
                         "def add(a, b):\n    return a + b\n"
                     )
                     return 0, "Implementation done"
+                else:
+                    return 1, f"ERROR: Unexpected GREEN call #{green_num}"
+            
+            elif "Fase REFACTOR" in prompt or "refactorizá" in prompt.lower():
+                phase_calls.append("refactor")
+                return 0, "SIN_REFACTOR"
             
             else:
-                # REFACTOR
-                return 0, "SIN_REFACTOR"
+                return 1, f"ERROR: Unknown phase in prompt: {prompt[:100]}"
         
         inputs = [
-            "y",  # Confirm first RED failure
-            "el test está mal, debería esperar 5 no 999",  # Decision for /DESVIO
+            "el test está mal, debería esperar 5 no 999",  # Decision for /DESVIO in GREEN #1
             "volver-a-red",  # Back to RED
-            "y"  # Confirm second RED failure
+            "y"  # Confirm second RED failure (if tests pass erroneously)
         ]
         input_idx = [0]
+        prompts_seen = []
         
-        def mock_input(prompt: str) -> str:
+        def mock_input(prompt_text: str) -> str:
+            prompts_seen.append(prompt_text)
             if input_idx[0] < len(inputs):
                 result = inputs[input_idx[0]]
                 input_idx[0] += 1
                 return result
-            return ""
+            raise AssertionError(f"Unexpected input request #{len(prompts_seen)}: {prompt_text}")
         
         outputs = []
         def mock_print(msg: str) -> None:
@@ -430,24 +428,36 @@ class TestBackToRedEndToEnd(unittest.TestCase):
         if not result:
             print("=== OUTPUTS ===")
             print("\n".join(outputs[-30:]))  # Last 30 lines
-            print(f"=== CODER CALLS === RED:{call_count['red']} GREEN:{call_count['green']}")
+            red_c = len([p for p in phase_calls if p == "red"])
+            green_c = len([p for p in phase_calls if p == "green"])
+            refactor_c = len([p for p in phase_calls if p == "refactor"])
+            print(f"=== CODER CALLS === RED:{red_c} GREEN:{green_c} REFACTOR:{refactor_c}")
+            print(f"=== PHASE CALLS === {phase_calls}")
+            print(f"=== PROMPTS SEEN ===")
+            for i, p in enumerate(prompts_seen):
+                print(f"{i+1}. {p[:80]}")
         
         self.assertTrue(result, "Should complete successfully")
         
         # Verify Revert commit exists
-        log_result = self._run(["git", "log", "--oneline", "--no-decorate"])
-        commits = log_result.stdout.strip().split("\n")
+        log_result = self._run(["git", "log", "--format=%s", "--no-decorate"])
+        commit_messages = log_result.stdout.strip().split("\n")
         
-        revert_commits = [c for c in commits if c.lower().startswith("revert \"test:")]
+        revert_commits = [c for c in commit_messages if "revert \"test:" in c.lower() or "revert 'test:" in c.lower()]
         self.assertGreater(len(revert_commits), 0, "Should have Revert commit")
         
-        # Verify "vuelta a RED" commit exists
-        vuelta_commits = [c for c in commits if "vuelta a red" in c.lower()]
-        self.assertGreater(len(vuelta_commits), 0, "Should have 'vuelta a RED' commit")
+        # Verify there are 2 RED commits (one reverted, one after back-to-RED)
+        red_test_commits = [c for c in commit_messages if c.startswith("test: implementar suma")]
+        self.assertEqual(len(red_test_commits), 2, f"Should have 2 RED commits. Got: {red_test_commits}")
         
-        # Verify second RED prompt contained /DESVIO feedback
-        self.assertEqual(call_count["red"], 2, "Should have 2 RED calls")
-        self.assertEqual(call_count["green"], 2, "Should have 2 GREEN calls")
+        # Verify second RED prompt contained /DESVIO feedback (verified in fake_coder)
+        red_count = len([p for p in phase_calls if p == "red"])
+        green_count = len([p for p in phase_calls if p == "green"])
+        refactor_count = len([p for p in phase_calls if p == "refactor"])
+        
+        self.assertEqual(red_count, 2, "Should have 2 RED calls")
+        self.assertEqual(green_count, 2, "Should have 2 GREEN calls")
+        self.assertEqual(refactor_count, 1, "Should have 1 REFACTOR call")
         
         # Verify final spec is done with all checkboxes
         spec_path = self.repo / "docs" / "specs" / "issue-5.md"
@@ -490,6 +500,9 @@ class TestBackToRedUserAnswersNo(unittest.TestCase):
         )
         self._run(["git", "add", "."])
         self._run(["git", "commit", "-m", "initial"])
+        
+        # Create RED commit
+        self._run(["git", "commit", "--allow-empty", "-m", "test: suma (#5)"])
         
         # Create spec with RED done
         self._create_spec()
@@ -542,15 +555,15 @@ class TestBackToRedUserAnswersNo(unittest.TestCase):
     
     def test_no_back_to_red_retries_green(self):
         """Test answering 'no' retries GREEN without revert."""
-        call_count = [0]
+        call_count = {"green": 0}
         
         def fake_coder(prompt: str, log_path: str) -> tuple[int, str]:
-            if "green" in log_path.lower():
-                call_count[0] += 1
+            if "Fase GREEN" in prompt:
+                call_count["green"] += 1
                 
-                if call_count[0] == 1:
+                if call_count["green"] == 1:
                     return 0, "/DESVIO problema con el assert"
-                elif call_count[0] == 2:
+                elif call_count["green"] == 2:
                     # After user says "no", retry with decision
                     if "Decisión tomada" not in prompt:
                         return 1, "ERROR: Expected decision in retry prompt"
@@ -558,8 +571,10 @@ class TestBackToRedUserAnswersNo(unittest.TestCase):
                     return 0, "Done"
                 else:
                     return 1, "Too many calls"
-            else:
+            elif "refactorizá" in prompt.lower():
                 return 0, "SIN_REFACTOR"
+            else:
+                return 1, f"ERROR: Unknown phase: {prompt[:100]}"
         
         inputs = [
             "usar assertEqual",  # Decision
@@ -567,12 +582,12 @@ class TestBackToRedUserAnswersNo(unittest.TestCase):
         ]
         input_idx = [0]
         
-        def mock_input(prompt: str) -> str:
+        def mock_input(prompt_text: str) -> str:
             if input_idx[0] < len(inputs):
                 result = inputs[input_idx[0]]
                 input_idx[0] += 1
                 return result
-            return ""
+            raise AssertionError(f"Unexpected input: {prompt_text}")
         
         outputs = []
         result = tdd_runner.run_tdd_implementation(
@@ -589,7 +604,7 @@ class TestBackToRedUserAnswersNo(unittest.TestCase):
         # Should NOT have Revert commit
         log_result = self._run(["git", "log", "--oneline", "--no-decorate"])
         commits = log_result.stdout.lower()
-        self.assertNotIn("revert", commits)
+        self.assertNotIn("revert", commits, "Should not have revert commit when user answers 'no'")
 
 
 class TestBackToRedSecondAttemptBlocked(unittest.TestCase):
@@ -597,13 +612,11 @@ class TestBackToRedSecondAttemptBlocked(unittest.TestCase):
     
     def test_second_back_to_red_returns_false(self):
         """Test trying to go back to RED twice returns False with message."""
-        # This test verifies the cap logic in run_tdd_implementation
-        # We'll use a minimal setup and mock to reach the cap
-        
         with tempfile.TemporaryDirectory() as tmpdir:
             repo = Path(tmpdir)
             
             # Setup minimal repo
+            (repo / "tests").mkdir()
             (repo / "docs" / "specs").mkdir(parents=True)
             (repo / ".backlog" / "runs").mkdir(parents=True)
             
@@ -611,22 +624,23 @@ class TestBackToRedSecondAttemptBlocked(unittest.TestCase):
             subprocess.run(["git", "config", "user.email", "t@t.com"], cwd=repo, capture_output=True)
             subprocess.run(["git", "config", "user.name", "T"], cwd=repo, capture_output=True)
             
-            (repo / "README.md").write_text("x\n")
+            (repo / "tests" / "__init__.py").write_text("")
+            (repo / "i.py").write_text("def foo():\n    raise NotImplementedError()\n")
             subprocess.run(["git", "add", "."], cwd=repo, capture_output=True)
             subprocess.run(["git", "commit", "-m", "init"], cwd=repo, capture_output=True)
             
-            # Create spec
+            # Create spec - use simple test command that works
             spec = {
                 "summary": "T",
                 "decisions": [{"id": "D1", "topic": "T", "options": ["A"], "chosen": "A", "rationale": "R"}],
                 "files": [],
-                "test_command": "true",
+                "test_command": "python3 -m pytest tests/t.py -v || python3 -m unittest tests.t 2>&1",
                 "tasks": [
                     {
                         "id": "T1",
                         "title": "task",
                         "description": "D",
-                        "tests": [{"file": "t.py", "name": "t", "asserts": "x"}],
+                        "tests": [{"file": "tests/t.py", "name": "test_t", "asserts": "x"}],
                         "impl_files": ["i.py"]
                     }
                 ],
@@ -643,21 +657,31 @@ class TestBackToRedSecondAttemptBlocked(unittest.TestCase):
             subprocess.run(["git", "add", str(spec_path)], cwd=repo, capture_output=True)
             subprocess.run(["git", "commit", "-m", "spec"], cwd=repo, capture_output=True)
             
-            # Fake coder that triggers back-to-RED twice
-            desvio_count = [0]
+            # Fake coder: RED #1 wrong, GREEN #1 /DESVIO, RED #2 still wrong, GREEN #2 /DESVIO
+            phase_calls = []
             
             def fake_coder(prompt, log):
-                if "green" in log.lower():
-                    desvio_count[0] += 1
-                    return 0, f"/DESVIO problema {desvio_count[0]}"
-                else:
-                    (repo / "t.py").write_text("test\n")
+                if "Fase RED" in prompt:
+                    phase_calls.append("red")
+                    # Write test that fails (expects 999 from NotImplementedError function)
+                    (repo / "tests" / "t.py").write_text(
+                        "import unittest\n"
+                        "import sys\n"
+                        "sys.path.insert(0, '.')\n"
+                        "from i import foo\n\n"
+                        "class TestT(unittest.TestCase):\n"
+                        "    def test_t(self):\n"
+                        "        self.assertEqual(foo(), 999)\n"
+                    )
                     return 0, "ok"
+                elif "Fase GREEN" in prompt:
+                    phase_calls.append("green")
+                    return 0, f"/DESVIO el test está mal"
+                else:
+                    return 0, "SIN_REFACTOR"
             
             inputs = [
-                "y",  # Confirm RED
                 "decisión 1", "volver-a-red",  # First back-to-RED
-                "y",  # Confirm second RED
                 "decisión 2", "volver-a-red"  # Second back-to-RED (should be blocked)
             ]
             input_idx = [0]
@@ -667,7 +691,7 @@ class TestBackToRedSecondAttemptBlocked(unittest.TestCase):
                     result = inputs[input_idx[0]]
                     input_idx[0] += 1
                     return result
-                return "abortar"
+                raise AssertionError(f"Unexpected input: {p}")
             
             outputs = []
             
@@ -686,7 +710,7 @@ class TestBackToRedSecondAttemptBlocked(unittest.TestCase):
             self.assertFalse(result, "Should fail on second back-to-RED")
             
             output_text = " ".join(outputs).lower()
-            self.assertIn("ya", output_text, "Should mention task already went back")
+            self.assertIn("ya volvió a red", output_text, f"Should mention task already went back. Output: {output_text[-500:]}")
 
 
 class TestFindRedCommitNotFound(unittest.TestCase):
@@ -698,6 +722,7 @@ class TestFindRedCommitNotFound(unittest.TestCase):
             repo = Path(tmpdir)
             
             # Setup
+            (repo / "tests").mkdir()
             (repo / "docs" / "specs").mkdir(parents=True)
             (repo / ".backlog" / "runs").mkdir(parents=True)
             
@@ -705,7 +730,7 @@ class TestFindRedCommitNotFound(unittest.TestCase):
             subprocess.run(["git", "config", "user.email", "t@t.com"], cwd=repo, capture_output=True)
             subprocess.run(["git", "config", "user.name", "T"], cwd=repo, capture_output=True)
             
-            (repo / "README.md").write_text("x\n")
+            (repo / "tests" / "__init__.py").write_text("")
             subprocess.run(["git", "add", "."], cwd=repo, capture_output=True)
             subprocess.run(["git", "commit", "-m", "init"], cwd=repo, capture_output=True)
             
@@ -714,13 +739,13 @@ class TestFindRedCommitNotFound(unittest.TestCase):
                 "summary": "T",
                 "decisions": [{"id": "D1", "topic": "T", "options": ["A"], "chosen": "A", "rationale": "R"}],
                 "files": [],
-                "test_command": "true",
+                "test_command": "python3 -m unittest discover -s tests -v",
                 "tasks": [
                     {
                         "id": "T1",
                         "title": "task",
                         "description": "D",
-                        "tests": [{"file": "t.py", "name": "t", "asserts": "x"}],
+                        "tests": [{"file": "tests/t.py", "name": "test_t", "asserts": "x"}],
                         "impl_files": ["i.py"]
                     }
                 ],
@@ -739,7 +764,7 @@ class TestFindRedCommitNotFound(unittest.TestCase):
             subprocess.run(["git", "commit", "-m", "spec"], cwd=repo, capture_output=True)
             
             def fake_coder(prompt, log):
-                if "green" in log.lower():
+                if "Fase GREEN" in prompt:
                     return 0, "/DESVIO problema"
                 return 0, "ok"
             
@@ -751,7 +776,7 @@ class TestFindRedCommitNotFound(unittest.TestCase):
                     result = inputs[input_idx[0]]
                     input_idx[0] += 1
                     return result
-                return "abortar"
+                raise AssertionError(f"Unexpected input: {p}")
             
             outputs = []
             
@@ -767,11 +792,127 @@ class TestFindRedCommitNotFound(unittest.TestCase):
                 print_fn=lambda m: outputs.append(m)
             )
             
-            self.assertFalse(result)
+            self.assertFalse(result, "Should fail when RED commit not found")
             
             output_text = " ".join(outputs).lower()
-            self.assertIn("no encontré", output_text)
-            self.assertIn("red", output_text)
+            self.assertIn("no encontré", output_text, "Should say 'no encontré'")
+            self.assertIn("commit de red", output_text, "Should mention RED commit")
+
+
+class TestBackToRedUsesInMemoryCommitMap(unittest.TestCase):
+    """Test back-to-RED uses in-memory red_commits map, not find_red_commit."""
+    
+    def test_find_red_commit_not_called_when_sha_known(self):
+        """Test find_red_commit is NOT called when SHA is already in red_commits map."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir)
+            
+            # Setup
+            (repo / "tests").mkdir()
+            (repo / "src").mkdir()
+            (repo / "docs" / "specs").mkdir(parents=True)
+            (repo / ".backlog" / "runs").mkdir(parents=True)
+            
+            subprocess.run(["git", "init"], cwd=repo, capture_output=True)
+            subprocess.run(["git", "config", "user.email", "t@t.com"], cwd=repo, capture_output=True)
+            subprocess.run(["git", "config", "user.name", "T"], cwd=repo, capture_output=True)
+            
+            (repo / "tests" / "__init__.py").write_text("")
+            (repo / "src" / "__init__.py").write_text("")
+            (repo / "src" / "calc.py").write_text("def add(a, b):\n    raise NotImplementedError()\n")
+            subprocess.run(["git", "add", "."], cwd=repo, capture_output=True)
+            subprocess.run(["git", "commit", "-m", "init"], cwd=repo, capture_output=True)
+            
+            # Create spec
+            spec = {
+                "summary": "Add",
+                "decisions": [{"id": "D1", "topic": "I", "options": ["f"], "chosen": "f", "rationale": "S"}],
+                "files": [],
+                "test_command": "python3 -m unittest discover -s tests -v",
+                "tasks": [
+                    {
+                        "id": "T1",
+                        "title": "suma",
+                        "description": "Add",
+                        "tests": [{"file": "tests/test_calc.py", "name": "test_add", "asserts": "x"}],
+                        "impl_files": ["src/calc.py"]
+                    }
+                ],
+                "out_of_scope": [],
+                "risks": []
+            }
+            
+            issue = {"number": 5, "title": "C"}
+            rendered = take_agent.render_spec_markdown(spec, issue)
+            rendered = rendered.replace("status: draft", "status: approved")
+            
+            spec_path = repo / "docs" / "specs" / "issue-5.md"
+            spec_path.write_text(rendered)
+            subprocess.run(["git", "add", str(spec_path)], cwd=repo, capture_output=True)
+            subprocess.run(["git", "commit", "-m", "spec"], cwd=repo, capture_output=True)
+            
+            # Fake coder
+            phase_calls = []
+            
+            def fake_coder(prompt, log):
+                if "Fase RED" in prompt:
+                    red_num = len([p for p in phase_calls if p == "red"]) + 1
+                    phase_calls.append("red")
+                    if red_num == 1:
+                        (repo / "tests" / "test_calc.py").write_text(
+                            "import unittest\n"
+                            "from src.calc import add\n\n"
+                            "class TestCalc(unittest.TestCase):\n"
+                            "    def test_add(self):\n"
+                            "        self.assertEqual(add(2, 3), 999)\n"
+                        )
+                    else:
+                        (repo / "tests" / "test_calc.py").write_text(
+                            "import unittest\n"
+                            "from src.calc import add\n\n"
+                            "class TestCalc(unittest.TestCase):\n"
+                            "    def test_add(self):\n"
+                            "        self.assertEqual(add(2, 3), 5)\n"
+                        )
+                    return 0, "ok"
+                elif "Fase GREEN" in prompt:
+                    green_num = len([p for p in phase_calls if p == "green"]) + 1
+                    phase_calls.append("green")
+                    if green_num == 1:
+                        return 0, "/DESVIO test malo"
+                    else:
+                        (repo / "src" / "calc.py").write_text("def add(a, b):\n    return a + b\n")
+                        return 0, "ok"
+                else:
+                    phase_calls.append("refactor")
+                    return 0, "SIN_REFACTOR"
+            
+            inputs = ["fix test", "volver-a-red"]
+            input_idx = [0]
+            
+            def mock_input(p):
+                if input_idx[0] < len(inputs):
+                    result = inputs[input_idx[0]]
+                    input_idx[0] += 1
+                    return result
+                raise AssertionError(f"Unexpected input: {p}")
+            
+            def run_cmd(cmd, **kwargs):
+                return subprocess.run(cmd, cwd=kwargs.get("cwd") or repo, capture_output=True, text=True, timeout=5)
+            
+            # Patch find_red_commit to raise AssertionError if called
+            from unittest.mock import patch
+            with patch.object(tdd_runner, "find_red_commit", side_effect=AssertionError("find_red_commit should NOT be called")):
+                result = tdd_runner.run_tdd_implementation(
+                    repo_root=str(repo),
+                    issue_num=5,
+                    coder=fake_coder,
+                    run_cmd=run_cmd,
+                    input_fn=mock_input,
+                    print_fn=lambda m: None
+                )
+                
+                self.assertTrue(result, "Should succeed without calling find_red_commit")
 
 
 class TestBuildRedPromptHardening(unittest.TestCase):
