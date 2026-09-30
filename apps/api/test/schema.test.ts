@@ -1,7 +1,7 @@
 import { describe, test, expect } from 'vitest';
 import { getTableConfig, PgDialect } from 'drizzle-orm/pg-core';
 import type { SQL } from 'drizzle-orm';
-import { users, profiles } from '../src/db/schema/index.js';
+import { users, profiles, llmProviders, llmRoutes, llmCalls } from '../src/db/schema/index.js';
 
 describe('users table', () => {
   test('test_users_table_has_correct_columns', () => {
@@ -119,5 +119,134 @@ describe('profiles table', () => {
     });
 
     expect(userIdFk).toBeDefined();
+  });
+});
+
+describe('llm_providers table', () => {
+  test('test_llm_providers_table_has_correct_columns', () => {
+    const config = getTableConfig(llmProviders);
+    const columns = config.columns;
+
+    const id = columns.find((c) => c.name === 'id');
+    const name = columns.find((c) => c.name === 'name');
+    const baseUrl = columns.find((c) => c.name === 'base_url');
+    const secretRef = columns.find((c) => c.name === 'secret_ref');
+    const enabled = columns.find((c) => c.name === 'enabled');
+
+    expect(id).toBeDefined();
+    expect(id!.columnType).toBe('PgUUID');
+
+    expect(name).toBeDefined();
+    expect(name!.columnType).toBe('PgText');
+    expect(name!.notNull).toBe(true);
+
+    expect(baseUrl).toBeDefined();
+    expect(baseUrl!.columnType).toBe('PgText');
+    expect(baseUrl!.notNull).toBe(true);
+
+    expect(secretRef).toBeDefined();
+    expect(secretRef!.columnType).toBe('PgText');
+    expect(secretRef!.notNull).toBe(true);
+
+    expect(enabled).toBeDefined();
+    expect(enabled!.columnType).toBe('PgBoolean');
+    expect(enabled!.notNull).toBe(true);
+  });
+
+  test('test_llm_providers_name_has_check_constraint', () => {
+    const config = getTableConfig(llmProviders);
+    const checks = config.checks;
+
+    expect(checks.length).toBeGreaterThan(0);
+
+    const nameCheck = checks.find((check) => {
+      const dialect = new PgDialect();
+      const checkSql = dialect.sqlToQuery(check.value).sql;
+      return checkSql.includes('nous') && checkSql.includes('gemini');
+    });
+
+    expect(nameCheck).toBeDefined();
+  });
+});
+
+describe('llm_routes table', () => {
+  test('test_llm_routes_pk_is_agent', () => {
+    const config = getTableConfig(llmRoutes);
+    const columns = config.columns;
+
+    const agent = columns.find((c) => c.name === 'agent');
+    expect(agent).toBeDefined();
+    expect(agent!.primary).toBe(true);
+
+    // Verificar que es la única columna con primary
+    const primaryColumns = columns.filter((c) => c.primary === true);
+    expect(primaryColumns.length).toBe(1);
+  });
+
+  test('test_llm_routes_has_fk_to_providers', () => {
+    const config = getTableConfig(llmRoutes);
+    const foreignKeys = config.foreignKeys;
+
+    expect(foreignKeys.length).toBeGreaterThan(0);
+
+    const providerIdFk = foreignKeys.find((fk) => {
+      const reference = fk.reference();
+      const foreignTableName = getTableConfig(reference.foreignTable).name;
+      const localColumns = reference.columns.map((c) => c.name);
+      return foreignTableName === 'llm_providers' && localColumns.includes('provider_id');
+    });
+
+    expect(providerIdFk).toBeDefined();
+  });
+});
+
+describe('llm_calls table', () => {
+  test('test_llm_calls_has_required_columns', () => {
+    const config = getTableConfig(llmCalls);
+    const columns = config.columns;
+
+    const tokensIn = columns.find((c) => c.name === 'tokens_in');
+    const tokensOut = columns.find((c) => c.name === 'tokens_out');
+    const costUsd = columns.find((c) => c.name === 'cost_usd');
+    const latencyMs = columns.find((c) => c.name === 'latency_ms');
+    const contextBreakdown = columns.find((c) => c.name === 'context_breakdown');
+    const provider = columns.find((c) => c.name === 'provider');
+
+    expect(tokensIn).toBeDefined();
+    expect(tokensIn!.columnType).toBe('PgInteger');
+    expect(tokensIn!.notNull).toBe(true);
+
+    expect(tokensOut).toBeDefined();
+    expect(tokensOut!.columnType).toBe('PgInteger');
+    expect(tokensOut!.notNull).toBe(true);
+
+    expect(costUsd).toBeDefined();
+    expect(costUsd!.columnType).toBe('PgNumeric');
+    expect(costUsd!.notNull).toBe(true);
+
+    expect(latencyMs).toBeDefined();
+    expect(latencyMs!.columnType).toBe('PgInteger');
+    expect(latencyMs!.notNull).toBe(true);
+
+    expect(contextBreakdown).toBeDefined();
+    expect(contextBreakdown!.columnType).toBe('PgJsonb');
+    expect(contextBreakdown!.notNull).toBe(true);
+
+    expect(provider).toBeDefined();
+    expect(provider!.columnType).toBe('PgText');
+    expect(provider!.notNull).toBe(true);
+  });
+
+  test('test_llm_calls_id_has_uuidv7_default', () => {
+    const config = getTableConfig(llmCalls);
+    const columns = config.columns;
+    const id = columns.find((c) => c.name === 'id');
+
+    expect(id).toBeDefined();
+    expect(id!.default).toBeDefined();
+
+    const dialect = new PgDialect();
+    const defaultSql = dialect.sqlToQuery(id!.default as SQL).sql;
+    expect(defaultSql).toContain('uuidv7()');
   });
 });

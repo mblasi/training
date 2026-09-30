@@ -238,7 +238,7 @@ Definir llm_providers(id uuid7, name CHECK, base_url, secret_ref, enabled), llm_
 - `apps/api/src/db/schema/index.ts`
 
 **Progreso:**
-- [ ] RED: tests escritos y fallan
+- [x] RED: tests escritos y fallan
 - [ ] GREEN: tests pasan
 - [ ] REFACTOR: código limpio
 
