@@ -5,15 +5,23 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "test": "vitest run",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "db:migrate": "drizzle-kit migrate",
+    "db:generate": "drizzle-kit generate",
+    "db:seed": "tsx src/db/seed.ts"
   },
   "dependencies": {
     "@trainia/shared": "workspace:*",
-    "fastify": "^5.2.0"
+    "drizzle-orm": "0.45.3",
+    "fastify": "^5.2.0",
+    "pg": "8.23.0"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
+    "@types/pg": "8.23.1",
+    "drizzle-kit": "0.31.11",
     "eslint": "^10.0.0",
     "tsx": "^4.19.2",
     "typescript": "~6.0.3",
