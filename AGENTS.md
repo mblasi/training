@@ -119,7 +119,10 @@ El prompt de RED incluye dos reglas adicionales para prevenir tests que fallen p
 
 **Confirmación en primer RED:**
 
-En el primer intento de RED, si los tests pasan (cuando deberían fallar), el harness pregunta: `¿Es un error de infraestructura o de los propios tests? (y/n)`. Si la respuesta es `y`, pide un comentario opcional para el coder y reintenta RED con ese feedback incluido en el prompt.
+En el primer intento de RED, si los tests pasan (cuando deberían fallar), el harness pregunta: `¿Es un error de infraestructura o de los propios tests? (a=abortar por infraestructura / t=reintentar RED con comentario / n=no)`. Podés responder:
+- `a` o `y` (por compatibilidad): aborta, retorna False (error de infraestructura no recuperable)
+- `t`: pide un comentario opcional para el coder y reintenta RED con ese feedback
+- cualquier otra cosa: cae en el flujo normal de retry/abortar
 
 **Al terminar:**
 

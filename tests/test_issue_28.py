@@ -992,46 +992,33 @@ class TestFirstRedConfirmationMentionsTests(unittest.TestCase):
             subprocess.run(["git", "add", str(spec_path)], cwd=repo, capture_output=True)
             subprocess.run(["git", "commit", "-m", "spec"], cwd=repo, capture_output=True)
             
-            # Fake coder that writes passing test first, then failing test
+            # Fake coder that writes passing test
             call_count = [0]
             def fake_coder(prompt, log):
                 if "red" in log.lower():
                     call_count[0] += 1
-                    if call_count[0] == 1:
-                        # First call: write passing test
-                        (repo / "tests" / "test_t.py").write_text(
-                            "import unittest\n\n"
-                            "class TestX(unittest.TestCase):\n"
-                            "    def test_x(self):\n"
-                            "        self.assertTrue(True)\n"
-                        )
-                    else:
-                        # Second call: write failing test
-                        (repo / "tests" / "test_t.py").write_text(
-                            "import unittest\n"
-                            "from src.i import foo\n\n"
-                            "class TestX(unittest.TestCase):\n"
-                            "    def test_x(self):\n"
-                            "        self.assertEqual(foo(), 5)\n"
-                        )
+                    # Write passing test
+                    (repo / "tests" / "test_t.py").write_text(
+                        "import unittest\n\n"
+                        "class TestX(unittest.TestCase):\n"
+                        "    def test_x(self):\n"
+                        "        self.assertTrue(True)\n"
+                    )
                 return 0, "ok"
             
-            prompts_seen = []
+            outputs = []
             
             def mock_input(p):
-                prompts_seen.append(p)
-                # Answer "y" to infrastructure question, then provide comment, then abort
-                if "infraestructura" in p.lower():
+                # Check outputs buffer to see if infrastructure question was asked
+                output_text = "\n".join(outputs)
+                if "infraestructura" in output_text.lower():
                     return "y"
-                if "comentario" in p.lower():
-                    return ""  # No comment
                 return "abortar"
             
             def run_cmd(cmd, **kwargs):
                 return subprocess.run(cmd, cwd=kwargs.get("cwd") or repo, capture_output=True, text=True, timeout=5)
             
-            outputs = []
-            tdd_runner.run_tdd_implementation(
+            result = tdd_runner.run_tdd_implementation(
                 repo_root=str(repo),
                 issue_num=1,
                 coder=fake_coder,
@@ -1040,13 +1027,184 @@ class TestFirstRedConfirmationMentionsTests(unittest.TestCase):
                 print_fn=lambda m: outputs.append(m)
             )
             
-            # Find the confirmation prompt (in outputs, not prompts_seen)
+            # Should abort (return False)
+            self.assertFalse(result)
+            
+            # Should call coder once only
+            self.assertEqual(call_count[0], 1, "Should call coder once")
+            
+            # Find the confirmation prompt (in outputs)
             output_text = "\n".join(outputs)
             self.assertIn("infraestructura", output_text.lower(), "Should ask about infrastructure")
             self.assertIn("propios tests", output_text.lower(), "Should mention 'propios tests'")
+            self.assertIn("abortando", output_text.lower(), "Should print 'Abortando'")
     
-    def test_first_red_confirmation_with_comment(self):
-        """Test answering 'y' then providing comment includes it in retry feedback."""
+    def test_first_red_confirmation_y_aborts(self):
+        """Test answering 'y' aborts and returns False."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir)
+            
+            # Setup
+            (repo / "tests").mkdir()
+            (repo / "src").mkdir()
+            (repo / "docs" / "specs").mkdir(parents=True)
+            (repo / ".backlog" / "runs").mkdir(parents=True)
+            
+            subprocess.run(["git", "init"], cwd=repo, capture_output=True)
+            subprocess.run(["git", "config", "user.email", "t@t.com"], cwd=repo, capture_output=True)
+            subprocess.run(["git", "config", "user.name", "T"], cwd=repo, capture_output=True)
+            
+            (repo / "tests" / "__init__.py").write_text("")
+            (repo / "src" / "__init__.py").write_text("")
+            subprocess.run(["git", "add", "."], cwd=repo, capture_output=True)
+            subprocess.run(["git", "commit", "-m", "init"], cwd=repo, capture_output=True)
+            
+            # Create spec
+            spec = {
+                "summary": "T",
+                "decisions": [{"id": "D1", "topic": "T", "options": ["A"], "chosen": "A", "rationale": "R"}],
+                "files": [],
+                "test_command": "python3 -m unittest discover -s tests -v",
+                "tasks": [
+                    {
+                        "id": "T1",
+                        "title": "task",
+                        "description": "D",
+                        "tests": [{"file": "tests/t.py", "name": "test_x", "asserts": "x"}],
+                        "impl_files": ["src/i.py"]
+                    }
+                ],
+                "out_of_scope": [],
+                "risks": []
+            }
+            
+            issue = {"number": 1, "title": "T"}
+            rendered = take_agent.render_spec_markdown(spec, issue)
+            rendered = rendered.replace("status: draft", "status: approved")
+            
+            spec_path = repo / "docs" / "specs" / "issue-1.md"
+            spec_path.write_text(rendered)
+            subprocess.run(["git", "add", str(spec_path)], cwd=repo, capture_output=True)
+            subprocess.run(["git", "commit", "-m", "spec"], cwd=repo, capture_output=True)
+            
+            call_count = [0]
+            def fake_coder(prompt, log):
+                if "red" in log.lower():
+                    call_count[0] += 1
+                    # Write passing test
+                    (repo / "tests" / "test_t.py").write_text(
+                        "import unittest\n\n"
+                        "class TestX(unittest.TestCase):\n"
+                        "    def test_x(self):\n"
+                        "        self.assertTrue(True)\n"
+                    )
+                return 0, "ok"
+            
+            def mock_input(p):
+                return "y"
+            
+            def run_cmd(cmd, **kwargs):
+                return subprocess.run(cmd, cwd=kwargs.get("cwd") or repo, capture_output=True, text=True, timeout=5)
+            
+            outputs = []
+            result = tdd_runner.run_tdd_implementation(
+                repo_root=str(repo),
+                issue_num=1,
+                coder=fake_coder,
+                run_cmd=run_cmd,
+                input_fn=mock_input,
+                print_fn=lambda m: outputs.append(m)
+            )
+            
+            # Should abort
+            self.assertFalse(result)
+            self.assertEqual(call_count[0], 1, "Should call coder once")
+            output_text = "\n".join(outputs)
+            self.assertIn("abortando", output_text.lower())
+    
+    def test_first_red_confirmation_a_aborts(self):
+        """Test answering 'a' aborts and returns False."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir)
+            
+            # Setup
+            (repo / "tests").mkdir()
+            (repo / "src").mkdir()
+            (repo / "docs" / "specs").mkdir(parents=True)
+            (repo / ".backlog" / "runs").mkdir(parents=True)
+            
+            subprocess.run(["git", "init"], cwd=repo, capture_output=True)
+            subprocess.run(["git", "config", "user.email", "t@t.com"], cwd=repo, capture_output=True)
+            subprocess.run(["git", "config", "user.name", "T"], cwd=repo, capture_output=True)
+            
+            (repo / "tests" / "__init__.py").write_text("")
+            (repo / "src" / "__init__.py").write_text("")
+            subprocess.run(["git", "add", "."], cwd=repo, capture_output=True)
+            subprocess.run(["git", "commit", "-m", "init"], cwd=repo, capture_output=True)
+            
+            # Create spec
+            spec = {
+                "summary": "T",
+                "decisions": [{"id": "D1", "topic": "T", "options": ["A"], "chosen": "A", "rationale": "R"}],
+                "files": [],
+                "test_command": "python3 -m unittest discover -s tests -v",
+                "tasks": [
+                    {
+                        "id": "T1",
+                        "title": "task",
+                        "description": "D",
+                        "tests": [{"file": "tests/t.py", "name": "test_x", "asserts": "x"}],
+                        "impl_files": ["src/i.py"]
+                    }
+                ],
+                "out_of_scope": [],
+                "risks": []
+            }
+            
+            issue = {"number": 1, "title": "T"}
+            rendered = take_agent.render_spec_markdown(spec, issue)
+            rendered = rendered.replace("status: draft", "status: approved")
+            
+            spec_path = repo / "docs" / "specs" / "issue-1.md"
+            spec_path.write_text(rendered)
+            subprocess.run(["git", "add", str(spec_path)], cwd=repo, capture_output=True)
+            subprocess.run(["git", "commit", "-m", "spec"], cwd=repo, capture_output=True)
+            
+            call_count = [0]
+            def fake_coder(prompt, log):
+                if "red" in log.lower():
+                    call_count[0] += 1
+                    (repo / "tests" / "test_t.py").write_text(
+                        "import unittest\n\n"
+                        "class TestX(unittest.TestCase):\n"
+                        "    def test_x(self):\n"
+                        "        self.assertTrue(True)\n"
+                    )
+                return 0, "ok"
+            
+            def mock_input(p):
+                return "a"
+            
+            def run_cmd(cmd, **kwargs):
+                return subprocess.run(cmd, cwd=kwargs.get("cwd") or repo, capture_output=True, text=True, timeout=5)
+            
+            outputs = []
+            result = tdd_runner.run_tdd_implementation(
+                repo_root=str(repo),
+                issue_num=1,
+                coder=fake_coder,
+                run_cmd=run_cmd,
+                input_fn=mock_input,
+                print_fn=lambda m: outputs.append(m)
+            )
+            
+            self.assertFalse(result)
+            self.assertEqual(call_count[0], 1, "Should call coder once")
+            output_text = "\n".join(outputs)
+            self.assertIn("abortando", output_text.lower())
+    
+    def test_first_red_confirmation_t_with_comment(self):
+        """Test answering 't' then providing comment includes it in retry feedback."""
         with tempfile.TemporaryDirectory() as tmpdir:
             repo = Path(tmpdir)
             
@@ -1118,7 +1276,7 @@ class TestFirstRedConfirmationMentionsTests(unittest.TestCase):
                         )
                 return 0, "ok"
             
-            inputs = ["y", "el test no debe usar assertTrue(True)", "y"]
+            inputs = ["t", "el test no debe usar assertTrue(True)", "y"]
             input_idx = [0]
             
             def mock_input(p):
@@ -1144,6 +1302,103 @@ class TestFirstRedConfirmationMentionsTests(unittest.TestCase):
             self.assertGreaterEqual(len(red_prompts), 2, "Should have at least 2 RED calls")
             second_prompt = red_prompts[1]
             self.assertIn("el test no debe usar assertTrue(True)", second_prompt)
+    
+    def test_first_red_confirmation_n_falls_through(self):
+        """Test answering 'n' falls through to existing retry path."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir)
+            
+            # Setup
+            (repo / "tests").mkdir()
+            (repo / "src").mkdir()
+            (repo / "docs" / "specs").mkdir(parents=True)
+            (repo / ".backlog" / "runs").mkdir(parents=True)
+            
+            subprocess.run(["git", "init"], cwd=repo, capture_output=True)
+            subprocess.run(["git", "config", "user.email", "t@t.com"], cwd=repo, capture_output=True)
+            subprocess.run(["git", "config", "user.name", "T"], cwd=repo, capture_output=True)
+            
+            (repo / "tests" / "__init__.py").write_text("")
+            (repo / "src" / "__init__.py").write_text("")
+            subprocess.run(["git", "add", "."], cwd=repo, capture_output=True)
+            subprocess.run(["git", "commit", "-m", "init"], cwd=repo, capture_output=True)
+            
+            # Create spec
+            spec = {
+                "summary": "T",
+                "decisions": [{"id": "D1", "topic": "T", "options": ["A"], "chosen": "A", "rationale": "R"}],
+                "files": [],
+                "test_command": "python3 -m unittest discover -s tests -v",
+                "tasks": [
+                    {
+                        "id": "T1",
+                        "title": "task",
+                        "description": "D",
+                        "tests": [{"file": "tests/t.py", "name": "test_x", "asserts": "x"}],
+                        "impl_files": ["src/i.py"]
+                    }
+                ],
+                "out_of_scope": [],
+                "risks": []
+            }
+            
+            issue = {"number": 1, "title": "T"}
+            rendered = take_agent.render_spec_markdown(spec, issue)
+            rendered = rendered.replace("status: draft", "status: approved")
+            
+            spec_path = repo / "docs" / "specs" / "issue-1.md"
+            spec_path.write_text(rendered)
+            subprocess.run(["git", "add", str(spec_path)], cwd=repo, capture_output=True)
+            subprocess.run(["git", "commit", "-m", "spec"], cwd=repo, capture_output=True)
+            
+            call_count = [0]
+            def fake_coder(prompt, log):
+                if "red" in log.lower():
+                    call_count[0] += 1
+                    if call_count[0] <= 2:
+                        # First two calls: write passing test
+                        (repo / "tests" / "test_t.py").write_text(
+                            "import unittest\n\n"
+                            "class TestX(unittest.TestCase):\n"
+                            "    def test_x(self):\n"
+                            "        self.assertTrue(True)\n"
+                        )
+                    else:
+                        # Third call: write failing test
+                        (repo / "tests" / "test_t.py").write_text(
+                            "import unittest\n"
+                            "from src.i import foo\n\n"
+                            "class TestX(unittest.TestCase):\n"
+                            "    def test_x(self):\n"
+                            "        self.assertEqual(foo(), 5)\n"
+                        )
+                return 0, "ok"
+            
+            # Answer 'n' to first RED confirmation, then normal retry flow
+            inputs = ["n", "continuar"]
+            input_idx = [0]
+            
+            def mock_input(p):
+                if input_idx[0] < len(inputs):
+                    result = inputs[input_idx[0]]
+                    input_idx[0] += 1
+                    return result
+                return "abortar"
+            
+            def run_cmd(cmd, **kwargs):
+                return subprocess.run(cmd, cwd=kwargs.get("cwd") or repo, capture_output=True, text=True, timeout=5)
+            
+            tdd_runner.run_tdd_implementation(
+                repo_root=str(repo),
+                issue_num=1,
+                coder=fake_coder,
+                run_cmd=run_cmd,
+                input_fn=mock_input,
+                print_fn=lambda m: None
+            )
+            
+            # Should call coder at least twice (first RED + retry)
+            self.assertGreaterEqual(call_count[0], 2, "Should call coder at least twice")
 
 
 if __name__ == "__main__":

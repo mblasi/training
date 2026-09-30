@@ -886,15 +886,19 @@ def run_red_phase(
             if attempt == 0:
                 print_fn("\nOutput de tests:\n")
                 print_fn(test_result.stdout[-1000:] if len(test_result.stdout) > 1000 else test_result.stdout)
-                print_fn("\n¿Es un error de infraestructura o de los propios tests? (y/n)")
+                print_fn("\n¿Es un error de infraestructura o de los propios tests? (a=abortar por infraestructura / t=reintentar RED con comentario / n=no)")
                 is_infra = input_fn("> ").strip().lower()
                 
-                if is_infra == "y":
-                    # Ask for optional comment
+                if is_infra in ("a", "y"):
+                    # Abort: backwards compatible with 'y' from main
+                    print_fn("Error de infraestructura detectado. Abortando.")
+                    return False
+                elif is_infra == "t":
+                    # Ask for optional comment and retry
                     comment = input_fn("Comentario para el coder (opcional): ").strip()
                     if comment:
                         last_feedback = comment
-                    print_fn("Error de infraestructura o tests detectado. Reintentando...")
+                    print_fn("Reintentando RED con feedback...")
                     # Revert and retry
                     if changed:
                         revert_files(repo_root, changed, run_cmd)
