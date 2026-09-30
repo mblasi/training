@@ -94,6 +94,36 @@ Si el agente de código necesita tomar una decisión no prevista en la spec, deb
 - El prompt de reintento incluye explícitamente la decisión tomada: "Decisión tomada para tu /DESVIO: <texto>"
 - **Tope de 3 desvíos por fase**: si se alcanzan 3 `/DESVIO` en RED o GREEN, la fase se detiene con un mensaje claro y retorna False (no se puede seguir con tantas decisiones adicionales)
 
+**Volver a RED desde GREEN:**
+
+Si durante GREEN el agente detecta que el problema está en los tests de RED (ej: el test es incorrecto o usa mal una API), puede activarse un flujo de vuelta a RED:
+1. El agente escribe `/DESVIO <explicación del problema con el test>`
+2. El usuario decide cómo resolver el problema
+3. El harness pregunta: `¿El problema está en los tests de RED? (volver-a-red/no):`
+4. Si la respuesta es exactamente `volver-a-red`:
+   - Se busca el commit de RED por su mensaje `test: <tarea> (#N)` usando `git log --fixed-strings --grep`
+   - Se revierte el commit RED con `git revert --no-edit <sha>`
+   - Se desmarca la checkbox de RED en la spec (`- [x] RED:` → `- [ ] RED:`)
+   - Se commitea: `docs: vuelta a RED de <task_id> (#N)`
+   - Se vuelve a ejecutar RED con feedback que incluye el texto del `/DESVIO` y la decisión tomada
+   - Después del nuevo RED, se ejecuta GREEN y REFACTOR normalmente
+   - **Tope: 1 vuelta a RED por tarea por run**. Si ya se volvió una vez, intentar volver de nuevo retorna False con mensaje claro.
+   - Si no se encuentra el commit de RED, retorna False con mensaje: "No encontré el commit de RED de <task>; no puedo volver a RED"
+5. Si la respuesta es cualquier otra cosa (`no`, enter vacío, etc.), se reintenta GREEN con la decisión tomada (comportamiento existente de /DESVIO)
+
+**Reglas de hardening para RED:**
+
+El prompt de RED incluye dos reglas adicionales para prevenir tests que fallen por razones incorrectas:
+1. "Los tests deben fallar PORQUE FALTA el código de producción de esta tarea (import o assert sobre ese código), nunca por usar mal la API de una librería, del framework de tests o por errores del propio test."
+2. "Antes de escribir asserts sobre una librería, verificá su API real en la versión instalada (tipos .d.ts en node_modules, o el código fuente) — no asumas la forma de los objetos."
+
+**Confirmación en primer RED:**
+
+En el primer intento de RED, si los tests pasan (cuando deberían fallar), el harness pregunta: `¿Es un error de infraestructura o de los propios tests? (a=abortar por infraestructura / t=reintentar RED con comentario / n=no)`. Podés responder:
+- `a` o `y` (por compatibilidad): aborta, retorna False (error de infraestructura no recuperable)
+- `t`: pide un comentario opcional para el coder y reintenta RED con ese feedback
+- cualquier otra cosa: cae en el flujo normal de retry/abortar
+
 **Al terminar:**
 
 - Todos los tests pasan
