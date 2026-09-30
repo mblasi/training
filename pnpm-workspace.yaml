@@ -6,6 +6,7 @@ allowBuilds:
   unrs-resolver: true
   protobufjs: true
   re2: true
+  '@firebase/util@1.15.3': true
 minimumReleaseAgeExclude:
   - '@expo/ui@57.0.21'
   - expo-constants@57.0.20
