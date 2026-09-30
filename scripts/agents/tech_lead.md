@@ -121,6 +121,13 @@ Cuando todas las decisiones estén acordadas y el usuario diga `/listo`, generá
           "asserts": "Qué verifica este test (assert X, assert Y)"
         }
       ],
+      "tests_to_remove": [
+        {
+          "file": "tests/test_foo.py",
+          "name": "test_old_behavior",
+          "reason": "Contradice el nuevo contrato acordado"
+        }
+      ],
       "impl_files": ["scripts/foo.py", "scripts/bar.py"],
       "test_support_files": ["tests/fixtures/data.json", "vitest.config.ts"]
     }
@@ -152,6 +159,7 @@ Cuando todas las decisiones estén acordadas y el usuario diga `/listo`, generá
 - `tasks` no puede estar vacío: debe haber al menos una tarea.
 - Cada tarea debe tener **al menos 1 test** en el array `tests`.
 - `test_support_files` es **opcional** (lista de paths de archivos de soporte para tests).
+- `tests_to_remove` es **opcional** (lista de tests existentes a eliminar; cada item con `file`, `name`, `reason`). Si una tarea cambia un contrato existente (schema, endpoint, response), leé los tests existentes de los archivos afectados y: (a) listá tests a modificar con el MISMO nombre en `tests[]`, (b) listá tests a eliminar en `tests_to_remove` con su razón (ej: "contradice el nuevo contrato", "reemplazado por test_new_behavior").
 - `test_command` no puede estar vacío: debe ser un comando ejecutable.
 - Si quedan preguntas abiertas, NO emitas la especificación; seguí conversando.
 
