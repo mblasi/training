@@ -21,22 +21,29 @@ describe('users table', () => {
     expect(firebaseUid).toBeDefined();
     expect(firebaseUid!.columnType).toBe('PgText');
     expect(firebaseUid!.notNull).toBe(true);
+    expect(firebaseUid!.isUnique).toBe(true);
 
     expect(email).toBeDefined();
     expect(email!.columnType).toBe('PgText');
     expect(email!.notNull).toBe(true);
+    expect(email!.isUnique).toBe(true);
 
     expect(role).toBeDefined();
     expect(role!.columnType).toBe('PgText');
     expect(role!.notNull).toBe(true);
+    expect(role!.hasDefault).toBe(true);
+    expect(role!.default).toBe('user');
 
     expect(locale).toBeDefined();
     expect(locale!.columnType).toBe('PgText');
     expect(locale!.notNull).toBe(true);
+    expect(locale!.hasDefault).toBe(true);
+    expect(locale!.default).toBe('es');
 
     expect(createdAt).toBeDefined();
     expect(createdAt!.columnType).toBe('PgTimestamp');
     expect(createdAt!.notNull).toBe(true);
+    expect(createdAt!.hasDefault).toBe(true);
   });
 
   test('test_users_id_has_uuidv7_default', () => {
@@ -103,12 +110,20 @@ describe('profiles table', () => {
     expect(updatedAt).toBeDefined();
     expect(updatedAt!.columnType).toBe('PgTimestamp');
     expect(updatedAt!.notNull).toBe(true);
+    expect(updatedAt!.hasDefault).toBe(true);
   });
 
   test('test_profiles_user_id_is_fk_to_users', () => {
     const config = getTableConfig(profiles);
+    const columns = config.columns;
     const foreignKeys = config.foreignKeys;
 
+    // Verify user_id is primary key
+    const userId = columns.find((c) => c.name === 'user_id');
+    expect(userId).toBeDefined();
+    expect(userId!.primary).toBe(true);
+
+    // Verify FK with cascade
     expect(foreignKeys.length).toBeGreaterThan(0);
 
     const userIdFk = foreignKeys.find((fk) => {
@@ -119,6 +134,7 @@ describe('profiles table', () => {
     });
 
     expect(userIdFk).toBeDefined();
+    expect(userIdFk!.onDelete).toBe('cascade');
   });
 });
 
@@ -139,6 +155,7 @@ describe('llm_providers table', () => {
     expect(name).toBeDefined();
     expect(name!.columnType).toBe('PgText');
     expect(name!.notNull).toBe(true);
+    expect(name!.isUnique).toBe(true);
 
     expect(baseUrl).toBeDefined();
     expect(baseUrl!.columnType).toBe('PgText');
@@ -162,7 +179,9 @@ describe('llm_providers table', () => {
     const nameCheck = checks.find((check) => {
       const dialect = new PgDialect();
       const checkSql = dialect.sqlToQuery(check.value).sql;
-      return checkSql.includes('nous') && checkSql.includes('gemini');
+      // Must contain 'nous' and 'gemini', and must NOT contain 'anthropic' or 'openai'
+      return checkSql.includes('nous') && checkSql.includes('gemini') && 
+             !checkSql.includes('anthropic') && !checkSql.includes('openai');
     });
 
     expect(nameCheck).toBeDefined();
@@ -197,6 +216,15 @@ describe('llm_routes table', () => {
     });
 
     expect(providerIdFk).toBeDefined();
+  });
+
+  test('test_llm_routes_updated_at_has_default', () => {
+    const config = getTableConfig(llmRoutes);
+    const columns = config.columns;
+
+    const updatedAt = columns.find((c) => c.name === 'updated_at');
+    expect(updatedAt).toBeDefined();
+    expect(updatedAt!.hasDefault).toBe(true);
   });
 });
 
@@ -323,5 +351,28 @@ describe('agent_prompts table', () => {
     const dialect = new PgDialect();
     const defaultSql = dialect.sqlToQuery(id!.default as SQL).sql;
     expect(defaultSql).toContain('uuidv7()');
+  });
+
+  test('test_agent_prompts_created_at_has_default', () => {
+    const config = getTableConfig(agentPrompts);
+    const columns = config.columns;
+    const createdAt = columns.find((c) => c.name === 'created_at');
+
+    expect(createdAt).toBeDefined();
+    expect(createdAt!.hasDefault).toBe(true);
+  });
+
+  test('test_agent_prompts_unique_agent_version', () => {
+    const config = getTableConfig(agentPrompts);
+    const uniqueConstraints = config.uniqueConstraints;
+
+    expect(uniqueConstraints.length).toBeGreaterThan(0);
+
+    const agentVersionUnique = uniqueConstraints.find((constraint) => {
+      const columnNames = constraint.columns.map((c) => c.name);
+      return columnNames.includes('agent') && columnNames.includes('version');
+    });
+
+    expect(agentVersionUnique).toBeDefined();
   });
 });

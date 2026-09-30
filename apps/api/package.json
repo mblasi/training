@@ -10,7 +10,7 @@
     "lint": "eslint .",
     "db:migrate": "drizzle-kit migrate",
     "db:generate": "drizzle-kit generate",
-    "db:seed": "tsx src/db/seed.ts"
+    "db:seed": "tsx src/db/seed-cli.ts"
   },
   "dependencies": {
     "@trainia/shared": "workspace:*",

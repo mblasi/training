@@ -91,20 +91,10 @@ export const SEED_ROUTES: RouteInsert[] = SEED_ROUTES_TEMPLATE.map((template) =>
   updated_at: new Date(),
 }));
 
-interface DbClient {
-  insert: (table: typeof llmProviders | typeof llmRoutes) => {
-    values: (rows: ProviderInsert[] | RouteInsert[]) => {
-      onConflictDoNothing: () => Promise<unknown>;
-    };
-  };
-  select: () => {
-    from: (table: typeof llmProviders) => Promise<{ id: string; name: string }[]>;
-  };
-}
-
-export async function runSeed(db: DbClient): Promise<void> {
-  // Insert providers
-  await db.insert(llmProviders).values(SEED_PROVIDERS).onConflictDoNothing();
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function runSeed(db: any): Promise<void> {
+  // Insert providers with conflict handling on name (UNIQUE column)
+  await db.insert(llmProviders).values(SEED_PROVIDERS).onConflictDoNothing({ target: llmProviders.name });
 
   // Fetch provider IDs
   const providers = await db.select().from(llmProviders);
@@ -132,6 +122,6 @@ export async function runSeed(db: DbClient): Promise<void> {
     updated_at: new Date(),
   }));
 
-  // Insert routes
-  await db.insert(llmRoutes).values(routesToInsert).onConflictDoNothing();
+  // Insert routes with conflict handling on agent (PRIMARY KEY)
+  await db.insert(llmRoutes).values(routesToInsert).onConflictDoNothing({ target: llmRoutes.agent });
 }

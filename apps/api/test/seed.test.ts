@@ -107,6 +107,7 @@ describe('runSeed', () => {
   test('test_runSeed_calls_onConflictDoNothing', async () => {
     const insertedProviders: ProviderInsert[] = [];
     const insertedRoutes: RouteInsert[] = [];
+    const onConflictTargets: unknown[] = [];
 
     const mockInsert = (table: unknown) => {
       const builder = {
@@ -119,7 +120,12 @@ describe('runSeed', () => {
             }
           }
           return {
-            onConflictDoNothing: () => Promise.resolve(),
+            onConflictDoNothing: (config?: { target: unknown }) => {
+              if (config) {
+                onConflictTargets.push(config.target);
+              }
+              return Promise.resolve();
+            },
           };
         },
       };
@@ -204,5 +210,10 @@ describe('runSeed', () => {
     expect(sintetizador).toBeDefined();
     expect(sintetizador!.provider_id).toBe(nousId);
     expect(sintetizador!.fallback_provider_id).toBe(geminiId);
+
+    // Verify onConflictDoNothing targets
+    expect(onConflictTargets).toHaveLength(2);
+    expect(onConflictTargets[0]).toBe(llmProviders.name);
+    expect(onConflictTargets[1]).toBe(llmRoutes.agent);
   });
 });

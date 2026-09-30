@@ -103,6 +103,13 @@ class TestIssue10Task2(unittest.TestCase):
                 scripts,
                 f"scripts debe incluir '{script_name}'"
             )
+        
+        # Verify db:seed points to seed-cli.ts
+        self.assertIn(
+            'seed-cli.ts',
+            scripts['db:seed'],
+            "db:seed script debe ejecutar seed-cli.ts"
+        )
 
     def test_drizzle_config_exists(self):
         """apps/api/drizzle.config.ts existe."""

@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, integer, timestamp, check } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, integer, timestamp, check, unique } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 
 export const agentPrompts = pgTable(
@@ -11,9 +11,10 @@ export const agentPrompts = pgTable(
     status: text('status', { enum: ['draft', 'published', 'archived'] }).notNull(),
     author: uuid('author').notNull(),
     notes: text('notes'),
-    created_at: timestamp('created_at').notNull(),
+    created_at: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
     check('status_check', sql`${table.status} IN ('draft', 'published', 'archived')`),
+    unique().on(table.agent, table.version),
   ]
 );
