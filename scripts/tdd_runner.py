@@ -259,6 +259,42 @@ def detect_desvio(output: str) -> str | None:
     return None
 
 
+def find_unremoved_tests(repo_root: str, task: dict[str, Any]) -> list[str]:
+    """
+    Find tests from task's tests_to_remove that still exist in their files.
+    
+    Args:
+        repo_root: Repository root path
+        task: Task dict with optional tests_to_remove field
+    
+    Returns:
+        List of "file::name" strings for tests that were not removed
+    """
+    tests_to_remove = task.get("tests_to_remove", [])
+    if not tests_to_remove:
+        return []
+    
+    unremoved = []
+    for removal in tests_to_remove:
+        file_path = Path(repo_root) / removal["file"]
+        test_name = removal["name"]
+        
+        # If file doesn't exist, test is removed
+        if not file_path.exists():
+            continue
+        
+        # Check if test name appears in file content
+        try:
+            content = file_path.read_text()
+            if test_name in content:
+                unremoved.append(f"{removal['file']}::{test_name}")
+        except Exception:
+            # If we can't read the file, assume it's removed
+            pass
+    
+    return unremoved
+
+
 def detect_empty_run(output: str) -> str | None:
     """
     Detect if test run was empty (no tests executed).
@@ -592,6 +628,32 @@ def run_red_phase(
         # Clear last_decision and last_feedback after successful non-/DESVIO call
         last_decision = None
         
+        # Verify tests_to_remove were actually removed
+        unremoved = find_unremoved_tests(repo_root, task)
+        if unremoved:
+            print_fn(f"Error: los siguientes tests deben ser eliminados pero siguen presentes:")
+            for test_name in unremoved:
+                print_fn(f"  - {test_name}")
+            
+            # Revert uncommitted changes
+            changed = get_changed_files(repo_root, run_cmd)
+            if changed:
+                revert_files(repo_root, changed, run_cmd)
+            
+            if attempt < max_attempts - 1:
+                print_fn("Reintentando RED...\n")
+                last_feedback = "Los siguientes tests NO fueron eliminados pero deben serlo:\n"
+                for test_name in unremoved:
+                    last_feedback += f"  - {test_name}\n"
+                last_feedback += "\nEliminá completamente estos tests de sus archivos."
+                attempt += 1
+                continue
+            else:
+                user_choice = input_fn("Continuar o abortar? (continuar/abortar): ").strip().lower()
+                if user_choice == "abortar":
+                    return False
+                break
+        
         # Verify only test files were changed
         changed = get_changed_files(repo_root, run_cmd)
         
@@ -823,6 +885,30 @@ def run_green_phase(
         # Clear last_decision after successful non-/DESVIO call
         last_decision = None
         
+        # Verify removed tests were not re-added
+        unremoved = find_unremoved_tests(repo_root, task)
+        if unremoved:
+            print_fn(f"Error: tests eliminados en RED fueron re-agregados:")
+            for test_name in unremoved:
+                print_fn(f"  - {test_name}")
+            
+            # Revert files that re-added tests
+            changed = get_changed_files(repo_root, run_cmd)
+            if changed:
+                revert_files(repo_root, changed, run_cmd)
+            
+            if attempt < max_attempts - 1:
+                print_fn("Reintentando GREEN...\n")
+                attempt += 1
+                continue
+            else:
+                user_choice = input_fn("Reintentar o abortar? (reintentar/abortar): ").strip().lower()
+                if user_choice == "abortar":
+                    return False
+                max_attempts += 1
+                attempt += 1
+                continue
+        
         # Verify test files unchanged
         new_hashes = get_file_hashes(repo_root, test_files, run_cmd)
         
@@ -1051,6 +1137,17 @@ def build_red_prompt(spec: dict[str, Any], task: dict[str, Any]) -> str:
     
     lines.append("")
     
+    # Add tests_to_remove section if present
+    tests_to_remove = task.get("tests_to_remove", [])
+    if tests_to_remove:
+        lines.append("## Tests existentes a ELIMINAR")
+        lines.append("")
+        for removal in tests_to_remove:
+            lines.append(f"- `{removal['file']}::{removal['name']}`: {removal['reason']}")
+        lines.append("")
+        lines.append("Eliminá estos tests completamente del archivo.")
+        lines.append("")
+    
     # Add test_support_files section if present
     test_support_files = task.get("test_support_files", [])
     if test_support_files:
@@ -1067,21 +1164,24 @@ def build_red_prompt(spec: dict[str, Any], task: dict[str, Any]) -> str:
     lines.append("1. Escribí SOLO los tests de esta tarea")
     lines.append("2. NO toques código de producción")
     
+    rule_num = 3
+    
     # List impl_files explicitly as forbidden if test_support_files present
     if test_support_files:
         impl_files = task.get("impl_files", [])
         if impl_files:
-            lines.append("3. Los siguientes archivos de implementación están PROHIBIDOS en RED:")
+            lines.append(f"{rule_num}. Los siguientes archivos de implementación están PROHIBIDOS en RED:")
             for impl_file in impl_files:
                 lines.append(f"   - `{impl_file}`")
-            lines.append("4. Los tests deben FALLAR (assert o NotImplementedError)")
-            lines.append("5. Si necesitás tomar una decisión no prevista, escribí una línea `/DESVIO <explicación>` y frená")
-        else:
-            lines.append("3. Los tests deben FALLAR (assert o NotImplementedError)")
-            lines.append("4. Si necesitás tomar una decisión no prevista, escribí una línea `/DESVIO <explicación>` y frená")
-    else:
-        lines.append("3. Los tests deben FALLAR (assert o NotImplementedError)")
-        lines.append("4. Si necesitás tomar una decisión no prevista, escribí una línea `/DESVIO <explicación>` y frená")
+            rule_num += 1
+    
+    lines.append(f"{rule_num}. Si un test de la lista ya existe en el archivo, modificalo para que cumpla lo indicado (no dupliques)")
+    rule_num += 1
+    lines.append(f"{rule_num}. Leé los tests existentes de los archivos que tocás: si alguno NO listado contradice esta tarea o las decisiones acordadas, escribí `/DESVIO <test y contradicción>` y frená; no lo cambies en silencio ni lo dejes")
+    rule_num += 1
+    lines.append(f"{rule_num}. Los tests deben FALLAR (assert o NotImplementedError)")
+    rule_num += 1
+    lines.append(f"{rule_num}. Si necesitás tomar una decisión no prevista, escribí una línea `/DESVIO <explicación>` y frená")
     
     lines.append("")
     
@@ -1132,7 +1232,17 @@ def build_green_prompt(spec: dict[str, Any], task: dict[str, Any], attempt: int)
     lines.append("")
     lines.append("1. Implementá lo mínimo para que pasen los tests")
     lines.append("2. NO modifiques los archivos de test")
-    lines.append("3. Si necesitás tomar una decisión no prevista, escribí `/DESVIO <explicación>` y frená")
+    
+    # Mention removed tests if present
+    tests_to_remove = task.get("tests_to_remove", [])
+    if tests_to_remove:
+        lines.append("3. Los siguientes tests ya fueron eliminados en RED y NO deben ser re-agregados:")
+        for removal in tests_to_remove:
+            lines.append(f"   - `{removal['file']}::{removal['name']}`")
+        lines.append("4. Si necesitás tomar una decisión no prevista, escribí `/DESVIO <explicación>` y frená")
+    else:
+        lines.append("3. Si necesitás tomar una decisión no prevista, escribí `/DESVIO <explicación>` y frená")
+    
     lines.append("")
     
     if attempt > 0:

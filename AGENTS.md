@@ -62,8 +62,11 @@ Para cada tarea pendiente, en orden:
 1. **RED**: invoca al agente de código (configurable con `BACKLOG_CODER_CMD` y `BACKLOG_CODER_MODEL`) con la spec y la tarea: "escribí SOLO los tests de esta tarea, no toques código de producción". El prompt incluye:
    - Si la tarea tiene `test_support_files` (ej: vitest.config.ts, pytest.ini), se listan con instrucción de crearlos/ajustarlos para que los tests se ejecuten y fallen por assert/import faltante, nunca por infraestructura faltante
    - Los archivos de `impl_files` se marcan explícitamente como prohibidos en RED
+   - Si la tarea tiene `tests_to_remove`, se lista la sección "Tests existentes a ELIMINAR" con cada `file::name` y reason
+   - Reglas obligatorias: (1) "Si un test de la lista ya existe en el archivo, modificalo para que cumpla lo indicado (no dupliques)"; (2) "Leé los tests existentes de los archivos que tocás: si alguno NO listado contradice esta tarea o las decisiones acordadas, escribí `/DESVIO <test y contradicción>` y frená; no lo cambies en silencio ni lo dejes"
    
    Verifica:
+   - Después del coder y antes de ejecutar tests: si hay `tests_to_remove`, verifica que cada `name` fue eliminado (ya no aparece en el archivo); si alguno sigue presente, revierte, pone feedback nombrando cada `file::name` no eliminado, y reintenta dentro del presupuesto de intentos (misma lógica de retry que para archivos de producción en RED)
    - Solo se modifican archivos de test, test_support_files, y **dependency infra files** (lockfiles como `pnpm-lock.yaml`, `package-lock.json`, `yarn.lock`, `poetry.lock`, `uv.lock`, `pnpm-workspace.yaml`, y archivos `requirements*.txt`)
    - Los tests **deben fallar** (si pasan, reintenta una vez y después pregunta al usuario)
    - Si el test command no ejecuta ningún test (detecta señales como "No test files found", "Ran 0 tests", "No projects matched"), se trata como error de infraestructura: revierte, reintenta con feedback al coder sobre la corrida vacía
@@ -156,6 +159,7 @@ test_command: python3 -m unittest discover -s tests -v
   - Cada tarea lista sus tests (en `tests[]`) y archivos de implementación (`impl_files`)
   - Opcionalmente, `test_support_files` para archivos de config o fixtures que los tests necesitan (ej: `vitest.config.ts`, `tsconfig.test.json`, `pytest.ini`)
   - Los `test_support_files` pueden crearse/modificarse en RED y GREEN, pero no en REFACTOR
+  - Opcionalmente, `tests_to_remove` (lista de `{file, name, reason}`) para tests existentes que deben eliminarse porque contradicen la spec. El harness verifica que fueron eliminados antes de continuar.
   - Checkboxes: `[ ] RED: tests escritos y fallan`, `[ ] GREEN: tests pasan`, `[ ] REFACTOR: código limpio`
 - Fuera de alcance
 - Riesgos

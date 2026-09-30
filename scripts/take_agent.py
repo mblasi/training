@@ -175,6 +175,20 @@ def validate_impl_spec(spec: dict[str, Any]) -> tuple[bool, str]:
         if "test_support_files" in task and not isinstance(task.get("test_support_files"), list):
             return False, f"Task {i} 'test_support_files' must be a list if provided"
         
+        # tests_to_remove is optional
+        if "tests_to_remove" in task:
+            if not isinstance(task["tests_to_remove"], list):
+                return False, f"Task {i} 'tests_to_remove' must be a list if provided"
+            for j, removal in enumerate(task["tests_to_remove"]):
+                if not isinstance(removal, dict):
+                    return False, f"Task {i}, tests_to_remove[{j}] is not an object"
+                if "file" not in removal or not removal["file"]:
+                    return False, f"Task {i}, tests_to_remove[{j}] missing or empty 'file'"
+                if "name" not in removal or not removal["name"]:
+                    return False, f"Task {i}, tests_to_remove[{j}] missing or empty 'name'"
+                if "reason" not in removal or not removal["reason"]:
+                    return False, f"Task {i}, tests_to_remove[{j}] missing or empty 'reason'"
+        
         if not isinstance(task["tests"], list) or len(task["tests"]) == 0:
             return False, f"Task {i} has no tests (cada tarea debe tener al menos 1 test)"
         
@@ -259,6 +273,11 @@ def render_spec_markdown(spec: dict[str, Any], issue: dict[str, Any]) -> str:
         for test in task["tests"]:
             lines.append(f"- `{test['file']}::{test['name']}`: {test['asserts']}")
         lines.append("")
+        if task.get("tests_to_remove"):
+            lines.append("**Tests a eliminar:**")
+            for removal in task["tests_to_remove"]:
+                lines.append(f"- `{removal['file']}::{removal['name']}`: {removal['reason']}")
+            lines.append("")
         if task.get("test_support_files"):
             lines.append("**Archivos de soporte de tests:**")
             for support_file in task["test_support_files"]:
@@ -363,15 +382,33 @@ def parse_spec_markdown(md: str) -> tuple[dict[str, Any], dict[str, Any], dict[s
         title = match.group(2)
         body = match.group(3)
         
-        # Extract tests
+        # Extract tests (only from **Tests:** section)
         tests = []
-        test_pattern = r"- `([^:]+)::([^`]+)`: (.*)"
-        for test_match in re.finditer(test_pattern, body):
-            tests.append({
-                "file": test_match.group(1),
-                "name": test_match.group(2),
-                "asserts": test_match.group(3)
-            })
+        test_section_pattern = r"\*\*Tests:\*\*\s*\n(.*?)(?:\n\n\*\*|\n\n$|\Z)"
+        test_section_match = re.search(test_section_pattern, body, re.DOTALL)
+        if test_section_match:
+            test_section = test_section_match.group(1)
+            test_pattern = r"- `([^:]+)::([^`]+)`: (.*)"
+            for test_match in re.finditer(test_pattern, test_section):
+                tests.append({
+                    "file": test_match.group(1),
+                    "name": test_match.group(2),
+                    "asserts": test_match.group(3)
+                })
+        
+        # Extract tests_to_remove (only from **Tests a eliminar:** section)
+        tests_to_remove = []
+        removal_section_pattern = r"\*\*Tests a eliminar:\*\*\s*\n(.*?)(?:\n\n\*\*|\n\n$|\Z)"
+        removal_section_match = re.search(removal_section_pattern, body, re.DOTALL)
+        if removal_section_match:
+            removal_section = removal_section_match.group(1)
+            removal_pattern = r"- `([^:]+)::([^`]+)`: (.*)"
+            for removal_match in re.finditer(removal_pattern, removal_section):
+                tests_to_remove.append({
+                    "file": removal_match.group(1),
+                    "name": removal_match.group(2),
+                    "reason": removal_match.group(3)
+                })
         
         # Extract test_support_files
         test_support_files = []
@@ -404,6 +441,8 @@ def parse_spec_markdown(md: str) -> tuple[dict[str, Any], dict[str, Any], dict[s
             "tests": tests,
             "impl_files": impl_files
         }
+        if tests_to_remove:
+            task_dict["tests_to_remove"] = tests_to_remove
         if test_support_files:
             task_dict["test_support_files"] = test_support_files
         
