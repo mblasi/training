@@ -166,6 +166,177 @@ def is_test_file(path: str) -> bool:
     return False
 
 
+def find_workspace_root(repo_root: str, file_path: str) -> str | None:
+    """
+    Find the nearest parent directory containing package.json.
+    
+    Searches upward from file_path until finding a package.json inside repo_root.
+    Returns the workspace root path (absolute) or None if not found.
+    """
+    repo_path = Path(repo_root)
+    file_abs = repo_path / file_path
+    
+    # Start from file's parent and walk up
+    current = file_abs.parent
+    
+    while current != repo_path.parent and current.is_relative_to(repo_path):
+        package_json = current / "package.json"
+        if package_json.exists():
+            return str(current)
+        current = current.parent
+    
+    return None
+
+
+# TS error codes that are acceptable in test files (missing production code)
+ACCEPTABLE_TS_ERRORS = {
+    "TS2307",  # Cannot find module
+    "TS2305",  # Module has no exported member
+    "TS2724",  # Module has no exported member (newer TS)
+    "TS2614",  # Module has no default export
+}
+
+
+def check_test_files_static(repo_root: str, test_files: list[str], run_cmd: Callable) -> str | None:
+    """
+    Check test files for static errors (lint, typecheck, syntax).
+    
+    For TS/JS test files: runs ESLint and TypeScript compiler in their workspace.
+    For Python test files: runs py_compile.
+    
+    Returns None if all checks pass, or a feedback string with tool output if checks fail.
+    
+    Args:
+        repo_root: Repository root path
+        test_files: List of test file paths (relative to repo_root)
+        run_cmd: Command runner function
+    
+    Returns:
+        None if valid, or feedback string with exact tool output if invalid
+    """
+    # Separate files by language
+    ts_js_files = []
+    py_files = []
+    
+    for f in test_files:
+        lower = f.lower()
+        if any(lower.endswith(ext) for ext in [".ts", ".tsx", ".js", ".jsx", ".mts", ".cts"]):
+            ts_js_files.append(f)
+        elif lower.endswith(".py"):
+            py_files.append(f)
+    
+    # Check TS/JS files grouped by workspace
+    if ts_js_files:
+        # Group by workspace
+        by_workspace = {}
+        for f in ts_js_files:
+            workspace = find_workspace_root(repo_root, f)
+            if workspace:
+                if workspace not in by_workspace:
+                    by_workspace[workspace] = []
+                by_workspace[workspace].append(f)
+        
+        for workspace, files in by_workspace.items():
+            workspace_path = Path(workspace)
+            repo_path = Path(repo_root)
+            
+            # Make file paths relative to workspace
+            files_rel = []
+            for f in files:
+                file_abs = repo_path / f
+                try:
+                    file_rel = file_abs.relative_to(workspace_path)
+                    files_rel.append(str(file_rel))
+                except ValueError:
+                    # File not under workspace? Skip
+                    pass
+            
+            if not files_rel:
+                continue
+            
+            # Check for eslint config
+            eslint_configs = [
+                ".eslintrc.js", ".eslintrc.cjs", ".eslintrc.json", ".eslintrc.yml", ".eslintrc.yaml",
+                "eslint.config.js", "eslint.config.cjs", "eslint.config.mjs"
+            ]
+            has_eslint = any((workspace_path / cfg).exists() for cfg in eslint_configs)
+            
+            if has_eslint:
+                # Run eslint
+                cmd = ["corepack", "pnpm", "--dir", workspace, "exec", "eslint"] + files_rel
+                result = run_cmd(cmd, cwd=repo_root, timeout=30)
+                
+                if result.returncode != 0:
+                    # ESLint failed
+                    return f"ESLint errors in test files:\n{result.stdout}\n{result.stderr}"
+            
+            # Check for tsconfig
+            has_tsconfig = (workspace_path / "tsconfig.json").exists()
+            
+            if has_tsconfig:
+                # Run tsc
+                cmd = ["corepack", "pnpm", "--dir", workspace, "exec", "tsc", "--noEmit", "--pretty", "false"]
+                result = run_cmd(cmd, cwd=repo_root, timeout=60)
+                
+                if result.returncode != 0:
+                    # Parse tsc output for errors in our test files
+                    # Format: path(line,col): error TSxxxx: message
+                    invalid_errors = []
+                    
+                    for line in result.stdout.splitlines():
+                        # Match error line format
+                        match = re.match(r"^(.+?)\(\d+,\d+\): error (TS\d+):", line)
+                        if not match:
+                            continue
+                        
+                        error_file = match.group(1)
+                        error_code = match.group(2)
+                        
+                        # Normalize path separators
+                        error_file_normalized = error_file.replace("\\", "/")
+                        
+                        # Check if error is in one of our changed test files
+                        is_in_changed_test = any(
+                            error_file_normalized.endswith(f.replace("\\", "/")) or
+                            error_file_normalized == f.replace("\\", "/")
+                            for f in files_rel
+                        )
+                        
+                        if is_in_changed_test:
+                            # Error in changed test file
+                            if error_code not in ACCEPTABLE_TS_ERRORS:
+                                # Not an acceptable error (missing production code)
+                                invalid_errors.append(line)
+                    
+                    if invalid_errors:
+                        return f"TypeScript errors in test files:\n" + "\n".join(invalid_errors)
+    
+    # Check Python files
+    for py_file in py_files:
+        file_path = Path(repo_root) / py_file
+        if not file_path.exists():
+            continue
+        
+        # Use py_compile to check syntax
+        import tempfile as tf
+        import py_compile
+        
+        try:
+            # Create a temp file for compilation (to avoid cache pollution)
+            with tf.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as tmp:
+                tmp.write(file_path.read_text())
+                tmp_path = tmp.name
+            
+            try:
+                py_compile.compile(tmp_path, doraise=True)
+            finally:
+                Path(tmp_path).unlink(missing_ok=True)
+        except py_compile.PyCompileError as e:
+            return f"Python syntax error in {py_file}:\n{e}"
+    
+    return None
+
+
 def get_changed_files(repo_root: str, run_cmd: Callable) -> list[str]:
     """
     Get list of changed files from git status --porcelain.
@@ -346,6 +517,78 @@ def detect_empty_run(output: str) -> str | None:
         if match:
             return match.group(0).strip()
     return None
+
+
+def find_nearest_package_json(repo_root: str, file_path: str) -> str | None:
+    """
+    Find the nearest package.json directory (workspace) for a file.
+    
+    Searches upward from the file's directory until finding a package.json
+    within repo_root.
+    
+    Args:
+        repo_root: Repository root path
+        file_path: File path relative to repo_root
+    
+    Returns:
+        Path to workspace directory (relative to repo_root) or None if not found
+    """
+    repo_path = Path(repo_root)
+    full_path = repo_path / file_path
+    
+    # Start from file's directory
+    current = full_path.parent
+    
+    # Search upward until repo_root
+    while current >= repo_path:
+        package_json = current / "package.json"
+        if package_json.exists():
+            # Return path relative to repo_root
+            return str(current.relative_to(repo_path)) if current != repo_path else "."
+        
+        if current == repo_path:
+            break
+        
+        current = current.parent
+    
+    return None
+
+
+def has_eslint_config(workspace_path: Path) -> bool:
+    """Check if a workspace has an ESLint config file."""
+    eslint_configs = [
+        ".eslintrc.js",
+        ".eslintrc.cjs",
+        ".eslintrc.yaml",
+        ".eslintrc.yml",
+        ".eslintrc.json",
+        "eslint.config.js",
+        "eslint.config.mjs",
+        "eslint.config.cjs"
+    ]
+    
+    for config_file in eslint_configs:
+        if (workspace_path / config_file).exists():
+            return True
+    
+    # Check package.json for eslintConfig field
+    package_json = workspace_path / "package.json"
+    if package_json.exists():
+        try:
+            import json
+            with open(package_json) as f:
+                data = json.load(f)
+                if "eslintConfig" in data:
+                    return True
+        except Exception:
+            pass
+    
+    return False
+
+
+def has_tsconfig(workspace_path: Path) -> bool:
+    """Check if a workspace has a tsconfig.json file."""
+    return (workspace_path / "tsconfig.json").exists()
 
 
 def append_decision_to_spec(
@@ -919,8 +1162,36 @@ def run_red_phase(
                     return False
                 break
         
-        # Tests failed as expected - commit
-        print_fn("Tests fallan correctamente. Commiteando...")
+        # Tests failed as expected - now check static validity of test files
+        print_fn("Tests fallan correctamente. Verificando lint/typecheck de tests...")
+        
+        # Get changed test files only
+        changed_test_files = [f for f in changed if is_test_file(f)]
+        
+        if changed_test_files:
+            static_feedback = check_test_files_static(repo_root, changed_test_files, run_cmd)
+            
+            if static_feedback:
+                print_fn("Los tests de RED no pasan lint/typecheck por sí mismos:")
+                print_fn(static_feedback)
+                
+                # Revert and retry with feedback
+                if changed:
+                    revert_files(repo_root, changed, run_cmd)
+                
+                if attempt < max_attempts - 1:
+                    print_fn("\nReintentando RED con feedback...\n")
+                    last_feedback = f"Los tests no pasan lint/typecheck:\n\n{static_feedback}\n\nArreglá los errores en los archivos de test."
+                    attempt += 1
+                    continue
+                else:
+                    user_choice = input_fn("Continuar o abortar? (continuar/abortar): ").strip().lower()
+                    if user_choice == "abortar":
+                        return False
+                    break
+        
+        # All checks passed - commit
+        print_fn("Commiteando...")
         
         # Mark RED in spec
         mark_progress(str(spec_path), task_id, "red")
@@ -1353,6 +1624,10 @@ def build_red_prompt(spec: dict[str, Any], task: dict[str, Any]) -> str:
                 lines.append(f"   - `{impl_file}`")
             rule_num += 1
     
+    lines.append(f"{rule_num}. Los archivos de test deben pasar lint y typecheck por sí mismos, excepto por el import/export faltante del código de producción. NO uses `any`, parámetros sin tipo, variables sin usar, etc.")
+    rule_num += 1
+    lines.append(f"{rule_num}. Los mocks/fakes NO deben reproducir la lógica bajo test: assertá sobre lo que la función le pasa a sus dependencias (ej: argumentos dados a db.insert/values/set) y devolvé datos con la forma real (nombres reales de columnas del schema).")
+    rule_num += 1
     lines.append(f"{rule_num}. Los tests deben fallar PORQUE FALTA el código de producción de esta tarea (import o assert sobre ese código), nunca por usar mal la API de una librería, del framework de tests o por errores del propio test.")
     rule_num += 1
     lines.append(f"{rule_num}. Antes de escribir asserts sobre una librería, verificá su API real en la versión instalada (tipos .d.ts en node_modules, o el código fuente) — no asumas la forma de los objetos.")
