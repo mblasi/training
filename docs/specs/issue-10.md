@@ -365,7 +365,7 @@ Crear docker-compose.yml con servicio postgres pgvector/pgvector:0.8.6-pg18, pue
 **Progreso:**
 - [x] RED: tests escritos y fallan
 - [x] GREEN: tests pasan
-- [ ] REFACTOR: código limpio
+- [x] REFACTOR: código limpio
 
 ### T12: CI: service container + steps integración + drift check + db.integration.test.ts + README
 
