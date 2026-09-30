@@ -15,6 +15,10 @@ from pathlib import Path
 from typing import Any
 
 
+# Status labels that should be removed when closing an issue after merge
+STATUS_LABELS_TO_CLEAR = ("status:todo", "status:wip", "status:review", "blocked")
+
+
 def run_command(cmd: list[str], cwd: str | None = None, check: bool = True) -> subprocess.CompletedProcess:
     """Execute a command safely using argument list (never shell=True)."""
     return subprocess.run(cmd, cwd=cwd, check=check, capture_output=True, text=True)
@@ -838,6 +842,56 @@ def cmd_pr(args):
     print(f"PR created: {pr_url}")
 
 
+def finalize_issue_after_merge(issue_num: int) -> tuple[list[str], bool]:
+    """
+    Clean up issue state after successful merge.
+    
+    Removes status labels (status:*, blocked) and closes the issue if still open.
+    
+    Args:
+        issue_num: Issue number to finalize
+    
+    Returns:
+        (removed_labels, closed_by_harness): tuple with list of removed label names
+        and boolean indicating whether the issue was closed by this function
+    """
+    # Read current issue state
+    result = run_command([
+        "gh", "issue", "view", str(issue_num),
+        "--json", "state,labels"
+    ])
+    issue = json.loads(result.stdout)
+    
+    current_labels = {label["name"] for label in issue["labels"]}
+    state = issue["state"]
+    
+    # Compute labels to remove
+    labels_to_remove = [
+        label for label in STATUS_LABELS_TO_CLEAR
+        if label in current_labels
+    ]
+    
+    # Remove labels if any
+    if labels_to_remove:
+        labels_arg = ",".join(labels_to_remove)
+        run_command([
+            "gh", "issue", "edit", str(issue_num),
+            "--remove-label", labels_arg
+        ])
+    
+    # Close issue if still open
+    closed_by_harness = False
+    if state != "CLOSED":
+        run_command([
+            "gh", "issue", "close", str(issue_num),
+            "--reason", "completed"
+        ])
+        closed_by_harness = True
+        print(f"Issue #{issue_num} was closed by the harness.")
+    
+    return labels_to_remove, closed_by_harness
+
+
 def cmd_merge(args):
     """Merge PR for an issue."""
     issue_num = args.issue
@@ -876,11 +930,18 @@ def cmd_merge(args):
     # Merge PR
     run_command(["gh", "pr", "merge", str(pr_number), "--squash", "--delete-branch"])
     
+    # Finalize issue: remove status labels and ensure it's closed
+    removed_labels, closed_by_harness = finalize_issue_after_merge(issue_num)
+    
     # Checkout and update main
     run_command(["git", "checkout", default_branch])
     run_command(["git", "pull", "--ff-only"])
     
-    print(f"PR #{pr_number} merged successfully. Issue #{issue_num} closed.")
+    # Print final message
+    msg = f"PR #{pr_number} merged successfully. Issue #{issue_num} closed."
+    if removed_labels:
+        msg += f" Labels quitados: {', '.join(removed_labels)}."
+    print(msg)
 
 
 def render_backlog(issues: list[dict[str, Any]]) -> str:
