@@ -158,7 +158,7 @@ Crear apps/api/src/db/env.ts con requireDatabaseUrl(env: NodeJS.ProcessEnv): str
 **Progreso:**
 - [x] RED: tests escritos y fallan
 - [x] GREEN: tests pasan
-- [ ] REFACTOR: código limpio
+- [x] REFACTOR: código limpio
 
 ### T4: createDb: factory que retorna {pool, db} sin conectar
 
