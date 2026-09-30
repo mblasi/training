@@ -4,7 +4,7 @@
 
 ## 🚧 En curso (WIP)
 
-_Nada por ahora._
+- [ ] [#11](https://github.com/mblasi/training/issues/11) Auth con Firebase (Google + email/password) en api, admin y mobile · feat · @mblasi
 
 ## 👀 En revisión
 
@@ -17,7 +17,6 @@ _Nada por ahora._
 - [ ] [#14](https://github.com/mblasi/training/issues/14) Stores: cuentas de desarrollador, EAS y build interno de la app · infra
 - [ ] [#13](https://github.com/mblasi/training/issues/13) Infra: proyecto GCP dedicado, Cloud Run + Cloud SQL staging y dominios trainia.blasi.ar · infra
 - [ ] [#12](https://github.com/mblasi/training/issues/12) Capa llm/ multi-proveedor (Nous Portal + Gemini) con rutas por agente y registro de llamadas · feat
-- [ ] [#11](https://github.com/mblasi/training/issues/11) Auth con Firebase (Google + email/password) en api, admin y mobile · feat
 
 ## ✅ Hecho
 
