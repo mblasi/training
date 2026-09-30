@@ -4,11 +4,11 @@
 
 ## 🚧 En curso (WIP)
 
-- [ ] ⛔ [#10](https://github.com/mblasi/training/issues/10) Postgres + pgvector local (Docker) + Drizzle + migraciones iniciales · feat · @mblasi
+- [ ] [#10](https://github.com/mblasi/training/issues/10) Postgres + pgvector local (Docker) + Drizzle + migraciones iniciales · feat · @mblasi
 
 ## 👀 En revisión
 
-- [ ] [#28](https://github.com/mblasi/training/issues/28) Harness: volver a RED desde GREEN cuando los tests de RED están mal + RED debe fallar por ausencia de código · fix · @mblasi
+_Nada por ahora._
 
 ## 📋 Pendiente
 
@@ -21,6 +21,7 @@
 
 ## ✅ Hecho
 
+- [x] [#28](https://github.com/mblasi/training/issues/28) Harness: volver a RED desde GREEN cuando los tests de RED están mal + RED debe fallar por ausencia de código · fix · @mblasi
 - [x] [#26](https://github.com/mblasi/training/issues/26) Harness: tests existentes que contradicen la spec traban GREEN (tests_to_remove + revisión en RED) · fix · @mblasi
 - [x] [#24](https://github.com/mblasi/training/issues/24) Harness: tool_calls sin tool_result al alcanzar el tope de herramientas del Tech Lead (HTTP 400) · fix · @mblasi
 - [x] [#9](https://github.com/mblasi/training/issues/9) Monorepo pnpm: apps/api, apps/admin, apps/mobile, packages/shared + CI · chore · @mblasi
