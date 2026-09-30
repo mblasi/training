@@ -4,11 +4,11 @@
 
 ## 🚧 En curso (WIP)
 
-- [ ] [#31](https://github.com/mblasi/training/issues/31) Harness: merge deja status:review en issues cerrados · fix · @mblasi
+_Nada por ahora._
 
 ## 👀 En revisión
 
-_Nada por ahora._
+- [ ] [#31](https://github.com/mblasi/training/issues/31) Harness: merge deja status:review en issues cerrados · fix · @mblasi
 
 ## 📋 Pendiente
 
