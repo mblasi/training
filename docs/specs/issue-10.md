@@ -32,6 +32,7 @@ Postgres 18 + pgvector + Drizzle en apps/api: docker-compose, schema inicial (6 
 | D14 | Migraciones SQL commiteadas | SQL commiteado en repo, Generado en CI en cada deploy | 0000_enable_vector.sql (--custom) + 0001_core.sql (drizzle-kit generate); meta/_journal.json + meta/*_snapshot.json commiteados; CI verifica drift con git diff --exit-code | drizzle-kit no genera CREATE EXTENSION; dos migraciones nombradas explícitamente; auditable y reproducible |
 | D15 | buildApp db requerido y arranque del servidor | db opcional con rama sin-db, db requerido siempre | buildApp({ db }) con db requerido; apps/api/src/index.ts llama requireDatabaseUrl(process.env) y crea el cliente antes de buildApp | Sin ramas muertas en producción; falla rápido si falta DATABASE_URL |
 | D16 | Contrato de /health durante T1–T9 y test viejo de shared | db requerido; `test_healthstatus_parse_valid_object` se actualiza con db:'ok'. El cambio de contrato es atómico en los 4 workspaces: T1 incluye apps/api/src/app.ts y apps/api/test/health.test.ts. Sin cliente de DB (llega en T10), /health responde status 'degraded', db 'error', HTTP 503; T10 lo reemplaza por el chequeo real SELECT 1 con timeout | Nunca un db 'ok' falso; sin capas de compat. Decisión tomada durante implementación |
+| D17 | Cómo inspeccionar el schema Drizzle en tests (T5–T7) | usar la API real de drizzle-orm 0.45.3 | `getTableConfig(t).columns` es un ARRAY: buscar por nombre (`columns.find(c => c.name === 'id')`), nunca indexar `columns.id`. SQL de defaults y CHECKs: `new PgDialect().sqlToQuery(col.default).sql` === `uuidv7()` y `sqlToQuery(check.value).sql` contiene los valores permitidos (nunca `.toString()`, devuelve `[object Object]`). PK de columna: `col.primary === true` (`config.primaryKeys` solo lista PK compuestas, queda vacío). FK: `config.foreignKeys[i].reference()` → `{columns, foreignTable, foreignColumns}`, verificar `getTableConfig(foreignTable).name`. Tipos: `col.columnType` (`PgUUID`, `PgText`, `PgInteger`, `PgTimestamp`, `PgJsonb`, …) | Verificado ejecutando drizzle-orm 0.45.3 instalado en apps/api. RED de T5 original usaba mal la API (volver a RED, #28) |
 
 ## Archivos afectados
 
@@ -213,7 +214,7 @@ Definir llm_providers(id uuid7, name CHECK, base_url, secret_ref, enabled), llm_
 **Tests:**
 - `apps/api/test/schema.test.ts::test_llm_providers_table_has_correct_columns`: getTableConfig(llmProviders).columns incluye id, name, base_url, secret_ref, enabled
 - `apps/api/test/schema.test.ts::test_llm_providers_name_has_check_constraint`: getTableConfig(llmProviders).checks contiene constraint con 'nous' y 'gemini'
-- `apps/api/test/schema.test.ts::test_llm_routes_pk_is_agent`: getTableConfig(llmRoutes).primaryKeys contiene solo columna 'agent'
+- `apps/api/test/schema.test.ts::test_llm_routes_pk_is_agent`: (D17) la columna 'agent' de llmRoutes tiene primary === true y es la única con primary
 - `apps/api/test/schema.test.ts::test_llm_routes_has_fk_to_providers`: getTableConfig(llmRoutes).foreignKeys contiene FK de provider_id hacia llm_providers
 - `apps/api/test/schema.test.ts::test_llm_calls_has_required_columns`: getTableConfig(llmCalls).columns incluye tokens_in, tokens_out, cost_usd, latency_ms, context_breakdown, provider
 - `apps/api/test/schema.test.ts::test_llm_calls_id_has_uuidv7_default`: columna id de llmCalls tiene default con referencia a uuidv7()
