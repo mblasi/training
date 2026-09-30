@@ -6,9 +6,44 @@ Verifica que las dependencias de Drizzle y pg estén instaladas, que los scripts
 de DB estén configurados, y que existan los archivos de configuración necesarios.
 """
 import json
+import re
 import unittest
 from pathlib import Path
-import yaml
+
+
+def extract_yaml_block(content: str, block_key: str, indent_level: int = 0) -> str:
+    """
+    Extract a YAML block by key at a specific indentation level.
+    Returns the block including its children.
+    """
+    lines = content.split('\n')
+    block_lines = []
+    in_block = False
+    block_indent = None
+    
+    for line in lines:
+        if not line.strip():
+            if in_block:
+                block_lines.append(line)
+            continue
+            
+        current_indent = len(line) - len(line.lstrip())
+        
+        if not in_block:
+            # Look for the block start
+            if current_indent == indent_level and line.lstrip().startswith(f"{block_key}:"):
+                in_block = True
+                block_indent = current_indent
+                block_lines.append(line)
+        else:
+            # Continue collecting lines at deeper indentation
+            if current_indent > block_indent or line.strip().startswith('-'):
+                block_lines.append(line)
+            else:
+                # End of block
+                break
+    
+    return '\n'.join(block_lines)
 
 
 class TestIssue10Task2(unittest.TestCase):
@@ -286,30 +321,19 @@ class TestIssue10Task12(unittest.TestCase):
             ".github/workflows/ci.yml debe existir"
         )
 
-        with open(self.ci_file, 'r') as f:
-            ci_data = yaml.safe_load(f)
-
-        # Verificar que el job 'node' tenga services con pgvector
-        jobs = ci_data.get('jobs', {})
+        content = self.ci_file.read_text()
+        
+        # Extract node job
+        jobs_block = extract_yaml_block(content, 'jobs', 0)
+        self.assertIn('node:', jobs_block, "ci.yml debe tener un job 'node'")
+        
+        node_block = extract_yaml_block(jobs_block, 'node', 2)
+        
+        # Extract services block
+        services_block = extract_yaml_block(node_block, 'services', 4)
         self.assertIn(
-            'node',
-            jobs,
-            "ci.yml debe tener un job 'node'"
-        )
-
-        node_job = jobs['node']
-        services = node_job.get('services', {})
-        
-        # Buscar algún servicio que use la imagen pgvector
-        found = False
-        for service_name, service_config in services.items():
-            image = service_config.get('image', '')
-            if 'pgvector/pgvector:0.8.6-pg18' in image:
-                found = True
-                break
-        
-        self.assertTrue(
-            found,
+            'pgvector/pgvector:0.8.6-pg18',
+            services_block,
             "ci.yml job 'node' debe tener un servicio con imagen 'pgvector/pgvector:0.8.6-pg18'"
         )
 
@@ -320,37 +344,21 @@ class TestIssue10Task12(unittest.TestCase):
             ".github/workflows/ci.yml debe existir"
         )
 
-        with open(self.ci_file, 'r') as f:
-            ci_data = yaml.safe_load(f)
-
-        # Verificar que el job 'node' tenga env con DATABASE_URL
-        jobs = ci_data.get('jobs', {})
-        self.assertIn(
-            'node',
-            jobs,
-            "ci.yml debe tener un job 'node'"
-        )
-
-        node_job = jobs['node']
-        env = node_job.get('env', {})
+        content = self.ci_file.read_text()
         
-        self.assertIn(
-            'DATABASE_URL',
-            env,
-            "ci.yml job 'node' debe tener DATABASE_URL en env"
-        )
-
-        database_url = env['DATABASE_URL']
-        self.assertIn(
-            'localhost',
-            database_url,
-            "DATABASE_URL debe contener 'localhost'"
-        )
-        self.assertIn(
-            '5432',
-            database_url,
-            "DATABASE_URL debe contener '5432'"
-        )
+        # Extract node job
+        jobs_block = extract_yaml_block(content, 'jobs', 0)
+        node_block = extract_yaml_block(jobs_block, 'node', 2)
+        
+        # Extract env block
+        env_block = extract_yaml_block(node_block, 'env', 4)
+        self.assertIn('DATABASE_URL', env_block, "ci.yml job 'node' debe tener DATABASE_URL en env")
+        
+        # Find DATABASE_URL line and verify it contains localhost and 5432
+        for line in env_block.split('\n'):
+            if 'DATABASE_URL' in line:
+                self.assertIn('localhost', line, "DATABASE_URL debe contener 'localhost'")
+                self.assertIn('5432', line, "DATABASE_URL debe contener '5432'")
 
     def test_ci_runs_db_migrate(self):
         """ci.yml contiene step con 'db:migrate'."""
@@ -359,29 +367,17 @@ class TestIssue10Task12(unittest.TestCase):
             ".github/workflows/ci.yml debe existir"
         )
 
-        with open(self.ci_file, 'r') as f:
-            ci_data = yaml.safe_load(f)
-
-        # Verificar que el job 'node' tenga un step que ejecute db:migrate
-        jobs = ci_data.get('jobs', {})
+        content = self.ci_file.read_text()
+        
+        # Extract node job
+        jobs_block = extract_yaml_block(content, 'jobs', 0)
+        node_block = extract_yaml_block(jobs_block, 'node', 2)
+        
+        # Extract steps block
+        steps_block = extract_yaml_block(node_block, 'steps', 4)
         self.assertIn(
-            'node',
-            jobs,
-            "ci.yml debe tener un job 'node'"
-        )
-
-        node_job = jobs['node']
-        steps = node_job.get('steps', [])
-        
-        found = False
-        for step in steps:
-            run = step.get('run', '')
-            if 'db:migrate' in run:
-                found = True
-                break
-        
-        self.assertTrue(
-            found,
+            'db:migrate',
+            steps_block,
             "ci.yml job 'node' debe tener un step que ejecute 'db:migrate'"
         )
 
@@ -392,29 +388,17 @@ class TestIssue10Task12(unittest.TestCase):
             ".github/workflows/ci.yml debe existir"
         )
 
-        with open(self.ci_file, 'r') as f:
-            ci_data = yaml.safe_load(f)
-
-        # Verificar que el job 'node' tenga un step que ejecute test:integration
-        jobs = ci_data.get('jobs', {})
+        content = self.ci_file.read_text()
+        
+        # Extract node job
+        jobs_block = extract_yaml_block(content, 'jobs', 0)
+        node_block = extract_yaml_block(jobs_block, 'node', 2)
+        
+        # Extract steps block
+        steps_block = extract_yaml_block(node_block, 'steps', 4)
         self.assertIn(
-            'node',
-            jobs,
-            "ci.yml debe tener un job 'node'"
-        )
-
-        node_job = jobs['node']
-        steps = node_job.get('steps', [])
-        
-        found = False
-        for step in steps:
-            run = step.get('run', '')
-            if 'test:integration' in run:
-                found = True
-                break
-        
-        self.assertTrue(
-            found,
+            'test:integration',
+            steps_block,
             "ci.yml job 'node' debe tener un step que ejecute 'test:integration'"
         )
 
@@ -425,36 +409,22 @@ class TestIssue10Task12(unittest.TestCase):
             ".github/workflows/ci.yml debe existir"
         )
 
-        with open(self.ci_file, 'r') as f:
-            ci_data = yaml.safe_load(f)
-
-        # Verificar que el job 'node' tenga steps que ejecuten db:generate y git diff
-        jobs = ci_data.get('jobs', {})
+        content = self.ci_file.read_text()
+        
+        # Extract node job
+        jobs_block = extract_yaml_block(content, 'jobs', 0)
+        node_block = extract_yaml_block(jobs_block, 'node', 2)
+        
+        # Extract steps block
+        steps_block = extract_yaml_block(node_block, 'steps', 4)
         self.assertIn(
-            'node',
-            jobs,
-            "ci.yml debe tener un job 'node'"
-        )
-
-        node_job = jobs['node']
-        steps = node_job.get('steps', [])
-        
-        found_generate = False
-        found_drift_check = False
-        
-        for step in steps:
-            run = step.get('run', '')
-            if 'db:generate' in run:
-                found_generate = True
-            if 'git diff --exit-code' in run:
-                found_drift_check = True
-        
-        self.assertTrue(
-            found_generate,
+            'db:generate',
+            steps_block,
             "ci.yml job 'node' debe tener un step que ejecute 'db:generate'"
         )
-        self.assertTrue(
-            found_drift_check,
+        self.assertIn(
+            'git diff --exit-code',
+            steps_block,
             "ci.yml job 'node' debe tener un step que ejecute 'git diff --exit-code'"
         )
 
@@ -465,34 +435,86 @@ class TestIssue10Task12(unittest.TestCase):
             ".github/workflows/ci.yml debe existir"
         )
 
-        with open(self.ci_file, 'r') as f:
-            ci_data = yaml.safe_load(f)
-
-        # Verificar que el job 'test' siga existiendo
-        jobs = ci_data.get('jobs', {})
-        self.assertIn(
-            'test',
-            jobs,
-            "ci.yml debe tener un job 'test'"
-        )
-
-        test_job = jobs['test']
-        steps = test_job.get('steps', [])
+        content = self.ci_file.read_text()
         
-        # Buscar el step de Setup Python
-        found = False
-        for step in steps:
-            if step.get('name') == 'Setup Python':
-                with_config = step.get('with', {})
-                python_version = with_config.get('python-version', '')
-                if python_version == '3.12':
-                    found = True
-                    break
+        # Extract jobs block
+        jobs_block = extract_yaml_block(content, 'jobs', 0)
+        self.assertIn('test:', jobs_block, "ci.yml debe tener un job 'test'")
         
+        # Extract test job
+        test_block = extract_yaml_block(jobs_block, 'test', 2)
+        
+        # Check for Setup Python step with version 3.12
+        self.assertIn('Setup Python', test_block, "job 'test' debe tener step 'Setup Python'")
+        self.assertIn("python-version: '3.12'", test_block, "Setup Python debe usar python-version '3.12'")
+
+    def test_ci_node_steps_order(self):
+        """ci.yml job 'node' ejecuta steps en orden: migrate → seed → seed → test:integration → generate → drift check."""
         self.assertTrue(
-            found,
-            "ci.yml job 'test' debe tener un step 'Setup Python' con python-version '3.12'"
+            self.ci_file.exists(),
+            ".github/workflows/ci.yml debe existir"
         )
+
+        content = self.ci_file.read_text()
+        
+        # Extract node job steps
+        jobs_block = extract_yaml_block(content, 'jobs', 0)
+        node_block = extract_yaml_block(jobs_block, 'node', 2)
+        steps_block = extract_yaml_block(node_block, 'steps', 4)
+        
+        # Find positions by searching for the run commands directly
+        # This is simpler and more robust than looking for names
+        steps_lines = steps_block.split('\n')
+        
+        migrate_pos = None
+        first_seed_pos = None
+        second_seed_pos = None
+        integration_pos = None
+        generate_pos = None
+        drift_pos = None
+        
+        seed_count = 0
+        
+        for i, line in enumerate(steps_lines):
+            # Check for commands in run: lines or in subsequent lines
+            if 'db:migrate' in line:
+                if migrate_pos is None:
+                    migrate_pos = i
+            elif 'db:seed' in line:
+                seed_count += 1
+                if seed_count == 1:
+                    first_seed_pos = i
+                elif seed_count == 2:
+                    second_seed_pos = i
+            elif 'test:integration' in line:
+                if integration_pos is None:
+                    integration_pos = i
+            elif 'db:generate' in line:
+                if generate_pos is None:
+                    generate_pos = i
+            elif 'git diff --exit-code' in line:
+                if drift_pos is None:
+                    drift_pos = i
+        
+        # Verify all steps were found
+        self.assertIsNotNone(migrate_pos, "No se encontró step con db:migrate")
+        self.assertIsNotNone(first_seed_pos, "No se encontró primer step con db:seed")
+        self.assertIsNotNone(second_seed_pos, "No se encontró segundo step con db:seed")
+        self.assertIsNotNone(integration_pos, "No se encontró step con test:integration")
+        self.assertIsNotNone(generate_pos, "No se encontró step con db:generate")
+        self.assertIsNotNone(drift_pos, "No se encontró step con git diff --exit-code")
+        
+        # Verify order
+        self.assertLess(migrate_pos, first_seed_pos, 
+                       "db:migrate debe ejecutarse antes del primer db:seed")
+        self.assertLess(first_seed_pos, second_seed_pos,
+                       "primer db:seed debe ejecutarse antes del segundo db:seed")
+        self.assertLess(second_seed_pos, integration_pos,
+                       "segundo db:seed debe ejecutarse antes de test:integration")
+        self.assertLess(integration_pos, generate_pos,
+                       "test:integration debe ejecutarse antes de db:generate")
+        self.assertLess(generate_pos, drift_pos,
+                       "db:generate debe ejecutarse antes del drift check")
 
     def test_integration_test_file_exists(self):
         """apps/api/test/db.integration.test.ts existe."""
@@ -549,22 +571,13 @@ class TestIssue10Task11(unittest.TestCase):
             "docker-compose.yml debe existir para verificar su contenido"
         )
 
-        with open(self.docker_compose_file, 'r') as f:
-            compose_data = yaml.safe_load(f)
-
-        # Buscar el servicio postgres y verificar que use la imagen correcta
-        services = compose_data.get('services', {})
+        content = self.docker_compose_file.read_text()
         
-        # Buscar cualquier servicio que use la imagen pgvector
-        found = False
-        for service_name, service_config in services.items():
-            image = service_config.get('image', '')
-            if 'pgvector/pgvector:0.8.6-pg18' in image:
-                found = True
-                break
-        
-        self.assertTrue(
-            found,
+        # Extract services block
+        services_block = extract_yaml_block(content, 'services', 0)
+        self.assertIn(
+            'pgvector/pgvector:0.8.6-pg18',
+            services_block,
             "docker-compose.yml debe contener un servicio con imagen 'pgvector/pgvector:0.8.6-pg18'"
         )
 
@@ -575,24 +588,14 @@ class TestIssue10Task11(unittest.TestCase):
             "docker-compose.yml debe existir para verificar su contenido"
         )
 
-        with open(self.docker_compose_file, 'r') as f:
-            compose_data = yaml.safe_load(f)
-
-        # Buscar el puerto 5432 en algún servicio
-        services = compose_data.get('services', {})
+        content = self.docker_compose_file.read_text()
         
-        found = False
-        for service_name, service_config in services.items():
-            ports = service_config.get('ports', [])
-            for port in ports:
-                if '5432' in str(port):
-                    found = True
-                    break
-            if found:
-                break
-        
-        self.assertTrue(
-            found,
+        # Extract services block and look for ports
+        services_block = extract_yaml_block(content, 'services', 0)
+        # Look for ports section with 5432
+        self.assertRegex(
+            services_block,
+            r'ports:\s*\n\s*-\s*["\']?5432',
             "docker-compose.yml debe contener el puerto 5432 en algún servicio"
         )
 
@@ -603,33 +606,18 @@ class TestIssue10Task11(unittest.TestCase):
             "docker-compose.yml debe existir para verificar su contenido"
         )
 
-        with open(self.docker_compose_file, 'r') as f:
-            compose_data = yaml.safe_load(f)
-
-        # Buscar healthcheck con pg_isready en algún servicio
-        services = compose_data.get('services', {})
+        content = self.docker_compose_file.read_text()
         
-        found_healthcheck = False
-        found_pg_isready = False
-        
-        for service_name, service_config in services.items():
-            healthcheck = service_config.get('healthcheck', {})
-            if healthcheck:
-                found_healthcheck = True
-                # Verificar que el healthcheck contenga pg_isready
-                test = healthcheck.get('test', '')
-                if isinstance(test, list):
-                    test = ' '.join(test)
-                if 'pg_isready' in str(test):
-                    found_pg_isready = True
-                    break
-        
-        self.assertTrue(
-            found_healthcheck,
+        # Extract services block
+        services_block = extract_yaml_block(content, 'services', 0)
+        self.assertIn(
+            'healthcheck',
+            services_block,
             "docker-compose.yml debe contener 'healthcheck' en algún servicio"
         )
-        self.assertTrue(
-            found_pg_isready,
+        self.assertIn(
+            'pg_isready',
+            services_block,
             "docker-compose.yml healthcheck debe contener 'pg_isready'"
         )
 
@@ -640,34 +628,17 @@ class TestIssue10Task11(unittest.TestCase):
             "docker-compose.yml debe existir para verificar su contenido"
         )
 
-        with open(self.docker_compose_file, 'r') as f:
-            compose_data = yaml.safe_load(f)
-
-        # Buscar variables de entorno de Postgres en algún servicio
-        services = compose_data.get('services', {})
+        content = self.docker_compose_file.read_text()
         
+        # Extract services block
+        services_block = extract_yaml_block(content, 'services', 0)
+        
+        # Check for required environment variables
         required_env_vars = ['POSTGRES_USER', 'POSTGRES_PASSWORD', 'POSTGRES_DB']
-        found_env_vars = set()
-        
-        for service_name, service_config in services.items():
-            environment = service_config.get('environment', {})
-            
-            # environment puede ser dict o lista
-            if isinstance(environment, dict):
-                env_keys = environment.keys()
-            elif isinstance(environment, list):
-                env_keys = [item.split('=')[0] for item in environment]
-            else:
-                continue
-            
-            for env_var in required_env_vars:
-                if env_var in env_keys:
-                    found_env_vars.add(env_var)
-        
         for env_var in required_env_vars:
             self.assertIn(
                 env_var,
-                found_env_vars,
+                services_block,
                 f"docker-compose.yml debe contener la variable de entorno '{env_var}'"
             )
 
