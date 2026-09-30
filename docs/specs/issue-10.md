@@ -179,7 +179,7 @@ Crear apps/api/src/db/client.ts con createDb(url: string): { pool: Pool, db }; t
 **Progreso:**
 - [x] RED: tests escritos y fallan
 - [x] GREEN: tests pasan
-- [ ] REFACTOR: código limpio
+- [x] REFACTOR: código limpio
 
 ### T5: Schema Drizzle: tablas users y profiles
 
