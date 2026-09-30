@@ -8,7 +8,7 @@
 
 ## 👀 En revisión
 
-- [ ] [#26](https://github.com/mblasi/training/issues/26) Harness: tests existentes que contradicen la spec traban GREEN (tests_to_remove + revisión en RED) · fix · @mblasi
+_Nada por ahora._
 
 ## 📋 Pendiente
 
@@ -21,6 +21,7 @@
 
 ## ✅ Hecho
 
+- [x] [#26](https://github.com/mblasi/training/issues/26) Harness: tests existentes que contradicen la spec traban GREEN (tests_to_remove + revisión en RED) · fix · @mblasi
 - [x] [#24](https://github.com/mblasi/training/issues/24) Harness: tool_calls sin tool_result al alcanzar el tope de herramientas del Tech Lead (HTTP 400) · fix · @mblasi
 - [x] [#9](https://github.com/mblasi/training/issues/9) Monorepo pnpm: apps/api, apps/admin, apps/mobile, packages/shared + CI · chore · @mblasi
 - [x] [#21](https://github.com/mblasi/training/issues/21) Harness: lockfiles permitidos en RED y /DESVIO sin consumir intento · fix · @mblasi
