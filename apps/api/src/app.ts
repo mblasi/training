@@ -5,12 +5,14 @@ import pkg from '../package.json' with { type: 'json' };
 export function buildApp() {
   const app = Fastify();
 
-  app.get('/health', async () => {
+  app.get('/health', async (request, reply) => {
     const response = {
-      status: 'ok' as const,
+      status: 'degraded' as const,
+      db: 'error' as const,
       version: pkg.version,
       timestamp: new Date().toISOString(),
     };
+    reply.code(503);
     // Validate with Zod before returning
     return healthStatusSchema.parse(response);
   });
