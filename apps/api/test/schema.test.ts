@@ -1,7 +1,7 @@
 import { describe, test, expect } from 'vitest';
 import { getTableConfig, PgDialect } from 'drizzle-orm/pg-core';
 import type { SQL } from 'drizzle-orm';
-import { users, profiles, llmProviders, llmRoutes, llmCalls } from '../src/db/schema/index.js';
+import { users, profiles, llmProviders, llmRoutes, llmCalls, agentPrompts } from '../src/db/schema/index.js';
 
 describe('users table', () => {
   test('test_users_table_has_correct_columns', () => {
@@ -239,6 +239,81 @@ describe('llm_calls table', () => {
 
   test('test_llm_calls_id_has_uuidv7_default', () => {
     const config = getTableConfig(llmCalls);
+    const columns = config.columns;
+    const id = columns.find((c) => c.name === 'id');
+
+    expect(id).toBeDefined();
+    expect(id!.default).toBeDefined();
+
+    const dialect = new PgDialect();
+    const defaultSql = dialect.sqlToQuery(id!.default as SQL).sql;
+    expect(defaultSql).toContain('uuidv7()');
+  });
+});
+
+describe('agent_prompts table', () => {
+  test('test_agent_prompts_table_has_correct_columns', () => {
+    const config = getTableConfig(agentPrompts);
+    const columns = config.columns;
+
+    const id = columns.find((c) => c.name === 'id');
+    const agent = columns.find((c) => c.name === 'agent');
+    const version = columns.find((c) => c.name === 'version');
+    const content = columns.find((c) => c.name === 'content');
+    const status = columns.find((c) => c.name === 'status');
+    const author = columns.find((c) => c.name === 'author');
+    const notes = columns.find((c) => c.name === 'notes');
+    const createdAt = columns.find((c) => c.name === 'created_at');
+
+    expect(id).toBeDefined();
+    expect(id!.columnType).toBe('PgUUID');
+
+    expect(agent).toBeDefined();
+    expect(agent!.columnType).toBe('PgText');
+    expect(agent!.notNull).toBe(true);
+
+    expect(version).toBeDefined();
+    expect(version!.columnType).toBe('PgInteger');
+    expect(version!.notNull).toBe(true);
+
+    expect(content).toBeDefined();
+    expect(content!.columnType).toBe('PgText');
+    expect(content!.notNull).toBe(true);
+
+    expect(status).toBeDefined();
+    expect(status!.columnType).toBe('PgText');
+    expect(status!.notNull).toBe(true);
+
+    expect(author).toBeDefined();
+    expect(author!.columnType).toBe('PgUUID');
+    expect(author!.notNull).toBe(true);
+
+    expect(notes).toBeDefined();
+    expect(notes!.columnType).toBe('PgText');
+    expect(notes!.notNull).toBe(false);
+
+    expect(createdAt).toBeDefined();
+    expect(createdAt!.columnType).toBe('PgTimestamp');
+    expect(createdAt!.notNull).toBe(true);
+  });
+
+  test('test_agent_prompts_status_has_check_constraint', () => {
+    const config = getTableConfig(agentPrompts);
+    const checks = config.checks;
+
+    expect(checks.length).toBeGreaterThan(0);
+
+    const statusCheck = checks.find((check) => {
+      const dialect = new PgDialect();
+      const checkSql = dialect.sqlToQuery(check.value).sql;
+      return checkSql.includes('draft') && checkSql.includes('published') && checkSql.includes('archived');
+    });
+
+    expect(statusCheck).toBeDefined();
+  });
+
+  test('test_agent_prompts_id_has_uuidv7_default', () => {
+    const config = getTableConfig(agentPrompts);
     const columns = config.columns;
     const id = columns.find((c) => c.name === 'id');
 

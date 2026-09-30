@@ -261,7 +261,7 @@ Definir agent_prompts(id uuid7, agent, version int, content text, status CHECK d
 - `apps/api/src/db/schema/index.ts`
 
 **Progreso:**
-- [ ] RED: tests escritos y fallan
+- [x] RED: tests escritos y fallan
 - [ ] GREEN: tests pasan
 - [ ] REFACTOR: código limpio
 
