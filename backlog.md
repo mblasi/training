@@ -4,12 +4,11 @@
 
 ## 🚧 En curso (WIP)
 
-- [ ] [#26](https://github.com/mblasi/training/issues/26) Harness: tests existentes que contradicen la spec traban GREEN (tests_to_remove + revisión en RED) · fix · @mblasi
 - [ ] ⛔ [#10](https://github.com/mblasi/training/issues/10) Postgres + pgvector local (Docker) + Drizzle + migraciones iniciales · feat · @mblasi
 
 ## 👀 En revisión
 
-_Nada por ahora._
+- [ ] [#26](https://github.com/mblasi/training/issues/26) Harness: tests existentes que contradicen la spec traban GREEN (tests_to_remove + revisión en RED) · fix · @mblasi
 
 ## 📋 Pendiente
 
