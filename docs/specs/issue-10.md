@@ -289,7 +289,7 @@ Crear seed.ts exportando constantes SEED_PROVIDERS (nous, gemini) y SEED_ROUTES 
 - `apps/api/src/db/seed.ts`
 
 **Progreso:**
-- [ ] RED: tests escritos y fallan
+- [x] RED: tests escritos y fallan
 - [ ] GREEN: tests pasan
 - [ ] REFACTOR: código limpio
 
