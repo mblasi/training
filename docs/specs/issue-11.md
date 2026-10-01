@@ -235,7 +235,7 @@ Agregar firebase@12.19.0; crear src/auth/firebaseConfig.ts con connectAuthEmulat
 - `pnpm-lock.yaml`
 
 **Progreso:**
-- [x] RED: tests escritos y fallan
+- [ ] RED: tests escritos y fallan
 - [ ] GREEN: tests pasan
 - [ ] REFACTOR: código limpio
 
