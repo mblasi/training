@@ -47,7 +47,7 @@ Funciones puras que extraen el tipo nombrado de un mensaje de error TS y buscan 
 - `scripts/tdd_runner.py`
 
 **Progreso:**
-- [ ] RED: tests escritos y fallan
+- [x] RED: tests escritos y fallan
 - [ ] GREEN: tests pasan
 - [ ] REFACTOR: código limpio
 
