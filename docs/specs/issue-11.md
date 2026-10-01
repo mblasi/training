@@ -164,7 +164,7 @@ Crear src/auth/upsertUser.ts con INSERT ON CONFLICT DO UPDATE en users; role = '
 
 **Progreso:**
 - [x] RED: tests escritos y fallan
-- [ ] GREEN: tests pasan
+- [x] GREEN: tests pasan
 - [ ] REFACTOR: código limpio
 
 ### T5: API: plugin auth + requireAdmin + rutas /me y /admin/ping
