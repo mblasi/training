@@ -254,12 +254,49 @@ def check_test_files_static(repo_root: str, test_files: list[str], run_cmd: Call
             if not files_rel:
                 continue
             
-            # Check for eslint config
-            eslint_configs = [
-                ".eslintrc.js", ".eslintrc.cjs", ".eslintrc.json", ".eslintrc.yml", ".eslintrc.yaml",
-                "eslint.config.js", "eslint.config.cjs", "eslint.config.mjs"
+            # Check for eslint config (search from workspace upward to repo_root)
+            has_eslint = False
+            eslint_flat_configs = [
+                "eslint.config.js", "eslint.config.mjs", "eslint.config.cjs",
+                "eslint.config.ts", "eslint.config.mts", "eslint.config.cts"
             ]
-            has_eslint = any((workspace_path / cfg).exists() for cfg in eslint_configs)
+            eslint_legacy_configs = [
+                ".eslintrc.js", ".eslintrc.cjs", ".eslintrc.json", ".eslintrc.yml", ".eslintrc.yaml"
+            ]
+            
+            # Search upward from workspace to repo_root (inclusive)
+            current = workspace_path
+            while current.is_relative_to(repo_path) or current == repo_path:
+                # Check flat configs
+                for cfg in eslint_flat_configs:
+                    if (current / cfg).exists():
+                        has_eslint = True
+                        break
+                
+                # Check legacy configs
+                if not has_eslint:
+                    for cfg in eslint_legacy_configs:
+                        if (current / cfg).exists():
+                            has_eslint = True
+                            break
+                
+                # Check package.json for eslintConfig field
+                if not has_eslint:
+                    package_json_path = current / "package.json"
+                    if package_json_path.exists():
+                        try:
+                            import json as json_mod
+                            with open(package_json_path) as pj:
+                                data = json_mod.load(pj)
+                                if "eslintConfig" in data:
+                                    has_eslint = True
+                        except Exception:
+                            pass
+                
+                if has_eslint or current == repo_path:
+                    break
+                
+                current = current.parent
             
             if has_eslint:
                 # Run eslint
@@ -282,6 +319,7 @@ def check_test_files_static(repo_root: str, test_files: list[str], run_cmd: Call
                     # Parse tsc output for errors in our test files
                     # Format: path(line,col): error TSxxxx: message
                     invalid_errors = []
+                    found_any_parseable_error = False
                     
                     for line in result.stdout.splitlines():
                         # Match error line format
@@ -289,6 +327,7 @@ def check_test_files_static(repo_root: str, test_files: list[str], run_cmd: Call
                         if not match:
                             continue
                         
+                        found_any_parseable_error = True
                         error_file = match.group(1)
                         error_code = match.group(2)
                         
@@ -310,6 +349,10 @@ def check_test_files_static(repo_root: str, test_files: list[str], run_cmd: Call
                     
                     if invalid_errors:
                         return f"TypeScript errors in test files:\n" + "\n".join(invalid_errors)
+                    
+                    # If tsc failed but no parseable errors found, return raw output
+                    if not found_any_parseable_error:
+                        return f"TypeScript compiler failed with unparseable output:\n{result.stdout}\n{result.stderr}"
     
     # Check Python files
     for py_file in py_files:
@@ -517,78 +560,6 @@ def detect_empty_run(output: str) -> str | None:
         if match:
             return match.group(0).strip()
     return None
-
-
-def find_nearest_package_json(repo_root: str, file_path: str) -> str | None:
-    """
-    Find the nearest package.json directory (workspace) for a file.
-    
-    Searches upward from the file's directory until finding a package.json
-    within repo_root.
-    
-    Args:
-        repo_root: Repository root path
-        file_path: File path relative to repo_root
-    
-    Returns:
-        Path to workspace directory (relative to repo_root) or None if not found
-    """
-    repo_path = Path(repo_root)
-    full_path = repo_path / file_path
-    
-    # Start from file's directory
-    current = full_path.parent
-    
-    # Search upward until repo_root
-    while current >= repo_path:
-        package_json = current / "package.json"
-        if package_json.exists():
-            # Return path relative to repo_root
-            return str(current.relative_to(repo_path)) if current != repo_path else "."
-        
-        if current == repo_path:
-            break
-        
-        current = current.parent
-    
-    return None
-
-
-def has_eslint_config(workspace_path: Path) -> bool:
-    """Check if a workspace has an ESLint config file."""
-    eslint_configs = [
-        ".eslintrc.js",
-        ".eslintrc.cjs",
-        ".eslintrc.yaml",
-        ".eslintrc.yml",
-        ".eslintrc.json",
-        "eslint.config.js",
-        "eslint.config.mjs",
-        "eslint.config.cjs"
-    ]
-    
-    for config_file in eslint_configs:
-        if (workspace_path / config_file).exists():
-            return True
-    
-    # Check package.json for eslintConfig field
-    package_json = workspace_path / "package.json"
-    if package_json.exists():
-        try:
-            import json
-            with open(package_json) as f:
-                data = json.load(f)
-                if "eslintConfig" in data:
-                    return True
-        except Exception:
-            pass
-    
-    return False
-
-
-def has_tsconfig(workspace_path: Path) -> bool:
-    """Check if a workspace has a tsconfig.json file."""
-    return (workspace_path / "tsconfig.json").exists()
 
 
 def append_decision_to_spec(
