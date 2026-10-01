@@ -164,7 +164,7 @@ Tests de integración de run_red_phase con repo git real: escenario exitoso (TS2
 - `scripts/tdd_runner.py`
 
 **Progreso:**
-- [x] RED: tests escritos y fallan
+- [ ] RED: tests escritos y fallan
 - [ ] GREEN: tests pasan
 - [ ] REFACTOR: código limpio
 
