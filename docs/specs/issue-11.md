@@ -196,7 +196,7 @@ Crear src/plugins/auth.ts (createAuthHook), src/plugins/requireAdmin.ts, src/typ
 - `apps/api/src/app.ts`
 
 **Progreso:**
-- [ ] RED: tests escritos y fallan
+- [x] RED: tests escritos y fallan
 - [ ] GREEN: tests pasan
 - [ ] REFACTOR: código limpio
 

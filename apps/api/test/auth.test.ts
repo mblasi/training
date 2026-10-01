@@ -224,3 +224,177 @@ describe('upsertUser', () => {
     expect(calls2[1].set.role).toBe('user');
   });
 });
+
+describe('auth plugin and requireAdmin', () => {
+  test('test_auth_plugin_returns_401_without_token', async () => {
+    const { buildApp } = await import('../src/app.js');
+    const mockAuth = {
+      verifyIdToken: vi.fn(),
+    };
+    const fakeDb = createFakeDb();
+
+    const app = buildApp({
+      db: fakeDb as never,
+      auth: mockAuth,
+      adminEmails: [],
+    });
+
+    // Sin header Authorization
+    const response1 = await app.inject({
+      method: 'GET',
+      url: '/me',
+    });
+
+    expect(response1.statusCode).toBe(401);
+    expect(mockAuth.verifyIdToken).not.toHaveBeenCalled();
+
+    // Con formato diferente
+    const response2 = await app.inject({
+      method: 'GET',
+      url: '/me',
+      headers: {
+        authorization: 'Basic xyz',
+      },
+    });
+
+    expect(response2.statusCode).toBe(401);
+    expect(mockAuth.verifyIdToken).not.toHaveBeenCalled();
+  });
+
+  test('test_auth_plugin_returns_401_with_invalid_token', async () => {
+    const { buildApp } = await import('../src/app.js');
+    const mockAuth = {
+      verifyIdToken: vi.fn().mockRejectedValue(new Error('invalid token')),
+    };
+    const fakeDb = createFakeDb();
+
+    const app = buildApp({
+      db: fakeDb as never,
+      auth: mockAuth,
+      adminEmails: [],
+    });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/me',
+      headers: {
+        authorization: 'Bearer bad-token',
+      },
+    });
+
+    expect(response.statusCode).toBe(401);
+    expect(mockAuth.verifyIdToken).toHaveBeenCalledWith('bad-token');
+    expect(fakeDb.getCalls()).toHaveLength(0);
+  });
+
+  test('test_auth_plugin_returns_200_and_user_with_valid_token', async () => {
+    const { buildApp } = await import('../src/app.js');
+    const mockAuth = {
+      verifyIdToken: vi.fn().mockResolvedValue({
+        uid: 'u1',
+        email: 'user@example.com',
+        email_verified: true,
+      }),
+    };
+    const fakeDb = createFakeDb();
+
+    const app = buildApp({
+      db: fakeDb as never,
+      auth: mockAuth,
+      adminEmails: [],
+    });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/me',
+      headers: {
+        authorization: 'Bearer valid-token',
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(mockAuth.verifyIdToken).toHaveBeenCalledWith('valid-token');
+
+    const body = JSON.parse(response.body);
+    expect(body).toEqual({
+      id: 'generated-uuid',
+      uid: 'u1',
+      email: 'user@example.com',
+      role: 'user',
+    });
+
+    const calls = fakeDb.getCalls();
+    expect(calls).toHaveLength(1);
+    expect(calls[0].row.firebase_uid).toBe('u1');
+    expect(calls[0].row.email).toBe('user@example.com');
+  });
+
+  test('test_requireAdmin_returns_403_for_user_role', async () => {
+    const { buildApp } = await import('../src/app.js');
+    const mockAuth = {
+      verifyIdToken: vi.fn().mockResolvedValue({
+        uid: 'u2',
+        email: 'user@example.com',
+        email_verified: true,
+      }),
+    };
+    const fakeDb = createFakeDb();
+
+    const app = buildApp({
+      db: fakeDb as never,
+      auth: mockAuth,
+      adminEmails: [],
+    });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/admin/ping',
+      headers: {
+        authorization: 'Bearer valid-token',
+      },
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(mockAuth.verifyIdToken).toHaveBeenCalledWith('valid-token');
+
+    const calls = fakeDb.getCalls();
+    expect(calls).toHaveLength(1);
+    expect(calls[0].row.role).toBe('user');
+  });
+
+  test('test_requireAdmin_returns_200_for_admin_role', async () => {
+    const { buildApp } = await import('../src/app.js');
+    const mockAuth = {
+      verifyIdToken: vi.fn().mockResolvedValue({
+        uid: 'u3',
+        email: 'admin@example.com',
+        email_verified: true,
+      }),
+    };
+    const fakeDb = createFakeDb();
+
+    const app = buildApp({
+      db: fakeDb as never,
+      auth: mockAuth,
+      adminEmails: ['admin@example.com'],
+    });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/admin/ping',
+      headers: {
+        authorization: 'Bearer admin-token',
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(mockAuth.verifyIdToken).toHaveBeenCalledWith('admin-token');
+
+    const body = JSON.parse(response.body);
+    expect(body).toEqual({ ok: true });
+
+    const calls = fakeDb.getCalls();
+    expect(calls).toHaveLength(1);
+    expect(calls[0].row.role).toBe('admin');
+  });
+});
