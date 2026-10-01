@@ -63,13 +63,23 @@ Para cada tarea pendiente, en orden:
    - Si la tarea tiene `test_support_files` (ej: vitest.config.ts, pytest.ini), se listan con instrucción de crearlos/ajustarlos para que los tests se ejecuten y fallen por assert/import faltante, nunca por infraestructura faltante
    - Los archivos de `impl_files` se marcan explícitamente como prohibidos en RED
    - Si la tarea tiene `tests_to_remove`, se lista la sección "Tests existentes a ELIMINAR" con cada `file::name` y reason
-   - Reglas obligatorias: (1) "Si un test de la lista ya existe en el archivo, modificalo para que cumpla lo indicado (no dupliques)"; (2) "Leé los tests existentes de los archivos que tocás: si alguno NO listado contradice esta tarea o las decisiones acordadas, escribí `/DESVIO <test y contradicción>` y frená; no lo cambies en silencio ni lo dejes"
+   - Reglas obligatorias:
+     1. "Los archivos de test deben pasar lint y typecheck por sí mismos, excepto por el import/export faltante del código de producción. NO uses `any`, parámetros sin tipo, variables sin usar, etc."
+     2. "Los mocks/fakes NO deben reproducir la lógica bajo test: asserts deben verificar qué le pasa la función a sus dependencias (ej: argumentos dados a db.insert/values/set) y devolver datos con la forma real (nombres de columnas del schema real)."
+     3. "Los tests deben fallar PORQUE FALTA el código de producción de esta tarea (import o assert sobre ese código), nunca por usar mal la API de una librería, del framework de tests o por errores del propio test."
+     4. "Antes de escribir asserts sobre una librería, verificá su API real en la versión instalada (tipos .d.ts en node_modules, o el código fuente) — no asumas la forma de los objetos."
+     5. "Si un test de la lista ya existe en el archivo, modificalo para que cumpla lo indicado (no dupliques)"
+     6. "Leé los tests existentes de los archivos que tocás: si alguno NO listado contradice esta tarea o las decisiones acordadas, escribí `/DESVIO <test y contradicción>` y frená; no lo cambies en silencio ni lo dejes"
    
    Verifica:
    - Después del coder y antes de ejecutar tests: si hay `tests_to_remove`, verifica que cada `name` fue eliminado (ya no aparece en el archivo); si alguno sigue presente, revierte, pone feedback nombrando cada `file::name` no eliminado, y reintenta dentro del presupuesto de intentos (misma lógica de retry que para archivos de producción en RED)
    - Solo se modifican archivos de test, test_support_files, y **dependency infra files** (lockfiles como `pnpm-lock.yaml`, `package-lock.json`, `yarn.lock`, `poetry.lock`, `uv.lock`, `pnpm-workspace.yaml`, y archivos `requirements*.txt`)
    - Los tests **deben fallar** (si pasan, reintenta una vez y después pregunta al usuario)
    - Si el test command no ejecuta ningún test (detecta señales como "No test files found", "Ran 0 tests", "No projects matched"), se trata como error de infraestructura: revierte, reintenta con feedback al coder sobre la corrida vacía
+   - **Validación estática de tests**: después de que los tests fallan como se espera, y antes de commitear, se verifica:
+     * Para archivos TS/JS: ESLint debe pasar en los archivos de test (si hay config eslint en el workspace). TypeScript compiler (`tsc --noEmit`) debe pasar, excepto por errores en los archivos de test que sean TS2307, TS2305, TS2724, TS2614 (missing module/export del código de producción). Cualquier otro error de tsc en los archivos de test (ej: TS7006 implicit any, TS6133 unused variable) rechaza el RED.
+     * Para archivos Python: `py_compile` debe pasar (sin SyntaxError).
+     * Si falla la validación estática: revierte, pone feedback con el output exacto de la herramienta, y reintenta dentro del presupuesto de intentos.
    - En el primer RED, muestra el output y pide confirmar que no es un error de infraestructura
    - Commit: `test: <tarea> (#N)`
 2. **GREEN**: invoca al agente: "implementá lo mínimo para que pasen los tests, sin modificar los tests". El prompt incluye `test_support_files` (pueden modificarse en GREEN) e `impl_files`.
