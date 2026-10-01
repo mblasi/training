@@ -162,7 +162,7 @@ Crear src/auth/upsertUser.ts con INSERT ON CONFLICT DO UPDATE en users; role = '
 - `apps/api/src/auth/upsertUser.ts`
 
 **Progreso:**
-- [x] RED: tests escritos y fallan
+- [ ] RED: tests escritos y fallan
 - [ ] GREEN: tests pasan
 - [ ] REFACTOR: código limpio
 
