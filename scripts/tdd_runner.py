@@ -100,6 +100,91 @@ def extract_ts_error_type_name(error_code: str, error_message: str) -> str | Non
     return None
 
 
+def test_imports_impl_file(test_file: str, impl_files: list[str], repo_root: str) -> bool:
+    """
+    Check if a test file imports a module that resolves to any impl_file.
+    
+    Parses static and dynamic import statements, resolves relative paths,
+    and matches against impl_files with extension resolution (.js -> .ts, no ext -> .ts).
+    
+    Args:
+        test_file: Test file path (relative to repo_root)
+        impl_files: List of implementation file paths (relative to repo_root)
+        repo_root: Absolute path to repository root
+    
+    Returns:
+        True if test file imports any impl_file, False otherwise
+    """
+    test_path = Path(repo_root) / test_file
+    
+    if not test_path.exists():
+        return False
+    
+    try:
+        content = test_path.read_text(encoding="utf-8")
+    except Exception:
+        return False
+    
+    # Find all import specifiers (static and dynamic)
+    # Static: import { x } from 'path' or import 'path'
+    # Dynamic: import('path')
+    import_pattern = re.compile(
+        r"""
+        (?:
+            (?:import\s+(?:\{[^}]*\}|\*\s+as\s+\w+|\w+)\s+from\s+['"]([^'"]+)['"])  # static import with specifier
+            |(?:import\s+['"]([^'"]+)['"])  # side-effect import
+            |(?:import\s*\(\s*['"]([^'"]+)['"]\s*\))  # dynamic import
+        )
+        """,
+        re.VERBOSE | re.MULTILINE
+    )
+    
+    matches = import_pattern.findall(content)
+    
+    # Flatten match groups (each match is a tuple of 3 groups, only one is non-empty)
+    import_paths = [m for group in matches for m in group if m]
+    
+    # Resolve each import path
+    test_dir = test_path.parent
+    
+    for import_path in import_paths:
+        # Skip non-relative imports (node_modules)
+        if not import_path.startswith('.'):
+            continue
+        
+        # Resolve relative path
+        resolved = (test_dir / import_path).resolve()
+        
+        # Try multiple extensions for extension resolution
+        # .js -> .ts, no ext -> .ts
+        candidates = []
+        
+        if resolved.suffix == ".js":
+            # Try replacing .js with .ts
+            candidates.append(resolved.with_suffix(".ts"))
+        elif resolved.suffix == "":
+            # Try adding .ts extension
+            candidates.append(resolved.with_suffix(".ts"))
+        else:
+            # Use as-is
+            candidates.append(resolved)
+        
+        # Check if any candidate matches an impl_file
+        for candidate in candidates:
+            # Normalize path to be relative to repo_root
+            try:
+                rel_path = candidate.relative_to(Path(repo_root))
+                normalized = str(rel_path).replace("\\", "/")
+                
+                if normalized in impl_files:
+                    return True
+            except ValueError:
+                # Not relative to repo_root, skip
+                continue
+    
+    return False
+
+
 def type_declared_in_impl_files(type_name: str, impl_files: list[str], repo_root: str) -> bool:
     """
     Check if a type name is declared in any of the impl_files.

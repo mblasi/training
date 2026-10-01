@@ -67,7 +67,7 @@ Función que verifica si un archivo de test importa un módulo relativo que resu
 
 **Progreso:**
 - [x] RED: tests escritos y fallan
-- [ ] GREEN: tests pasan
+- [x] GREEN: tests pasan
 - [ ] REFACTOR: código limpio
 
 ### T3: check_test_files_static acepta errores TS extendidos con impl_files opcional
