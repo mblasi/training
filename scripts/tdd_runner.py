@@ -745,32 +745,41 @@ def get_file_hashes(repo_root: str, files: list[str], run_cmd: Callable) -> dict
 
 
 def revert_files(repo_root: str, files: list[str], run_cmd: Callable) -> None:
-    """Revert specific files to HEAD."""
+    """Revert specific files to HEAD.
+
+    Tracked files are restored with `git checkout --`; untracked ones are deleted.
+    The two groups are handled separately because git aborts the whole checkout
+    when any pathspec is unknown to it.
+    """
     if not files:
         return
-    
-    # Revert tracked changes
-    run_cmd(
-        ["git", "checkout", "--"] + files,
-        cwd=repo_root,
-        timeout=10
-    )
-    
-    # Clean untracked files in those paths
+
+    tracked: list[str] = []
+    untracked: list[str] = []
     for file_path in files:
+        result = run_cmd(
+            ["git", "ls-files", "--", file_path],
+            cwd=repo_root,
+            timeout=5
+        )
+        if result.stdout.strip():
+            tracked.append(file_path)
+        else:
+            untracked.append(file_path)
+
+    if tracked:
+        run_cmd(
+            ["git", "checkout", "--"] + tracked,
+            cwd=repo_root,
+            timeout=10
+        )
+
+    for file_path in untracked:
         full_path = Path(repo_root) / file_path
-        if full_path.exists():
-            result = run_cmd(
-                ["git", "ls-files", file_path],
-                cwd=repo_root,
-                timeout=5
-            )
-            # If file is not tracked, remove it
-            if not result.stdout.strip():
-                if full_path.is_dir():
-                    shutil.rmtree(full_path, ignore_errors=True)
-                else:
-                    full_path.unlink(missing_ok=True)
+        if full_path.is_dir() and not full_path.is_symlink():
+            shutil.rmtree(full_path, ignore_errors=True)
+        else:
+            full_path.unlink(missing_ok=True)
 
 
 def detect_desvio(output: str) -> str | None:
@@ -1226,6 +1235,17 @@ def run_red_phase(
     last_decision = None  # Decision from last /DESVIO
     desvio_count = 0  # Track /DESVIO count for cap
     
+    def commit_red() -> None:
+        print_fn("Commiteando...")
+        mark_progress(str(spec_path), task_id, "red")
+        run_cmd(["git", "add", "."], cwd=repo_root, timeout=10)
+        run_cmd(
+            ["git", "commit", "-m", f"test: {task['title']} (#{issue_num})"],
+            cwd=repo_root,
+            timeout=10
+        )
+        print_fn("RED completo.\n")
+
     attempt = 0
     while attempt < max_attempts:
         # Build prompt
@@ -1380,20 +1400,24 @@ def run_red_phase(
                 print_fn(f"  {cast_line}")
                 print_fn("No uses casts '} as never)', '} as any)' o '} as unknown as X)' sobre el argumento completo.")
                 
-                # Revert changes
-                if changed:
-                    revert_files(repo_root, changed, run_cmd)
-                
+                # Do NOT revert between attempts (D2): the coder fixes in place.
+                # Only revert on abort or exhausted attempts.
                 if attempt < max_attempts - 1:
                     print_fn("Reintentando RED...\n")
-                    last_feedback = f"Cast prohibido detectado en línea:\n\n  {cast_line}\n\nNo uses casts '}} as never)', '}} as any)' o '}} as unknown as X)' sobre el argumento completo."
+                    last_feedback = f"Cast prohibido detectado en línea:\n\n  {cast_line}\n\nNo uses casts '}} as never)', '}} as any)' o '}} as unknown as X)' sobre el argumento completo. Corregí los archivos de test existentes."
                     attempt += 1
                     continue
                 else:
                     user_choice = input_fn("Continuar o abortar? (continuar/abortar): ").strip().lower()
                     if user_choice == "abortar":
+                        # Revert all changed files on abort
+                        if changed:
+                            revert_files(repo_root, changed, run_cmd)
                         return False
-                    break
+                    # user chose 'continuar': accept the cast and fall through to the
+                    # remaining RED checks (tests must fail, empty run, static check)
+                    print_fn("\n⚠️  ADVERTENCIA: Los tests contienen casts prohibidos sobre el argumento completo.")
+                    print_fn("Se acepta el cast según tu decisión de continuar; se siguen verificando el resto de los checks de RED.\n")
         
         # Run tests (must FAIL)
         print_fn("Ejecutando tests...")
@@ -1493,22 +1517,11 @@ def run_red_phase(
                     # user chose 'continuar': commit with warning
                     print_fn("\n⚠️  ADVERTENCIA: Los tests NO pasan lint/typecheck por sí mismos.")
                     print_fn("Commiteando de todas formas según tu decisión de continuar.\n")
-                    break
+                    commit_red()
+                    return True
         
         # All checks passed - commit
-        print_fn("Commiteando...")
-        
-        # Mark RED in spec
-        mark_progress(str(spec_path), task_id, "red")
-        
-        run_cmd(["git", "add", "."], cwd=repo_root, timeout=10)
-        run_cmd(
-            ["git", "commit", "-m", f"test: {task['title']} (#{issue_num})"],
-            cwd=repo_root,
-            timeout=10
-        )
-        
-        print_fn("RED completo.\n")
+        commit_red()
         return True
     
     # Exhausted attempts
