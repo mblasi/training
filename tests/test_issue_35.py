@@ -634,6 +634,431 @@ import { buildApp } from '../src/app.js';
                 self.assertIsNone(result, f"{code} should still be accepted with impl_files")
 
 
+class TestGetNewLinesAndDetectCast(unittest.TestCase):
+    """Test get_new_lines and detect_full_arg_cast functions (T5)."""
+    
+    def setUp(self) -> None:
+        """Create temp git repository for testing."""
+        self.temp_dir = tempfile.mkdtemp(prefix="test_new_lines_")
+        self.repo_root = Path(self.temp_dir)
+        
+        # Initialize git repo
+        subprocess.run(["git", "init"], cwd=self.repo_root, check=True, capture_output=True)
+        subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=self.repo_root, check=True, capture_output=True)
+        subprocess.run(["git", "config", "user.name", "Test User"], cwd=self.repo_root, check=True, capture_output=True)
+        
+        # Create initial commit
+        readme = self.repo_root / "README.md"
+        readme.write_text("# Test repo")
+        subprocess.run(["git", "add", "."], cwd=self.repo_root, check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "Initial commit"], cwd=self.repo_root, check=True, capture_output=True)
+        
+        # Create test directory
+        (self.repo_root / "test").mkdir()
+    
+    def tearDown(self) -> None:
+        """Clean up temp directory."""
+        import shutil
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+    
+    def _run(self, cmd: list[str], cwd: str | None = None, timeout: int = 10) -> subprocess.CompletedProcess:
+        """Helper to run command."""
+        if cwd is None:
+            cwd = self.repo_root
+        return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout, check=False)
+    
+    def test_get_new_lines_untracked_returns_all_lines(self) -> None:
+        """get_new_lines para archivo sin trackear retorna todas sus líneas."""
+        # Create untracked file
+        test_file = self.repo_root / "test" / "new.test.ts"
+        test_file.write_text(
+            "import { test } from 'vitest';\n"
+            "\n"
+            "test('foo', () => {\n"
+            "  buildApp({ db } as never);\n"
+            "});\n"
+        )
+        
+        # Get new lines
+        result = tdd_runner.get_new_lines(
+            str(self.repo_root),
+            "test/new.test.ts",
+            self._run
+        )
+        
+        # Should return all lines
+        self.assertEqual(len(result), 5)
+        self.assertIn("import { test } from 'vitest';", result)
+        self.assertIn("  buildApp({ db } as never);", result)
+    
+    def test_get_new_lines_tracked_returns_only_added_lines(self) -> None:
+        """get_new_lines para archivo trackeado retorna solo líneas '+' del git diff HEAD."""
+        # Create and commit file
+        test_file = self.repo_root / "test" / "existing.test.ts"
+        test_file.write_text(
+            "import { test } from 'vitest';\n"
+            "\n"
+            "test('existing', () => {\n"
+            "  const x = fakeDb as never;\n"
+            "});\n"
+        )
+        subprocess.run(["git", "add", str(test_file)], cwd=self.repo_root, check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "Add existing test"], cwd=self.repo_root, check=True, capture_output=True)
+        
+        # Modify file: add new lines
+        test_file.write_text(
+            "import { test } from 'vitest';\n"
+            "import { buildApp } from '../src/app.js';\n"  # NEW LINE
+            "\n"
+            "test('existing', () => {\n"
+            "  const x = fakeDb as never;\n"
+            "});\n"
+            "\n"  # NEW LINE
+            "test('new', () => {\n"  # NEW LINE
+            "  buildApp({ db } as never);\n"  # NEW LINE
+            "});\n"  # NEW LINE
+        )
+        
+        # Get new lines
+        result = tdd_runner.get_new_lines(
+            str(self.repo_root),
+            "test/existing.test.ts",
+            self._run
+        )
+        
+        # Should return only added lines
+        self.assertIn("import { buildApp } from '../src/app.js';", result)
+        self.assertIn("test('new', () => {", result)
+        self.assertIn("  buildApp({ db } as never);", result)
+        self.assertIn("});", result)
+        
+        # Should NOT include existing lines
+        self.assertNotIn("import { test } from 'vitest';", result)
+        self.assertNotIn("test('existing', () => {", result)
+    
+    def test_detect_cast_finds_as_never_paren(self) -> None:
+        """detect_full_arg_cast detecta '} as never)' en línea nueva y retorna esa línea."""
+        # Create test file with cast
+        test_file = self.repo_root / "test" / "cast.test.ts"
+        test_file.write_text(
+            "import { test } from 'vitest';\n"
+            "import { buildApp } from '../src/app.js';\n"
+            "\n"
+            "test('cast', () => {\n"
+            "  buildApp({ port: 3000 } as never);\n"
+            "});\n"
+        )
+        
+        # Mock get_new_lines to return all lines (file is untracked)
+        all_lines = test_file.read_text().split("\n")
+        
+        def mock_run_cmd(cmd, cwd=None, timeout=None):
+            from types import SimpleNamespace
+            # Simulate git ls-files showing file is untracked
+            if "git" in cmd and "ls-files" in cmd:
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+        
+        result = tdd_runner.detect_full_arg_cast(
+            str(self.repo_root),
+            ["test/cast.test.ts"],
+            mock_run_cmd
+        )
+        
+        # Should return the problematic line
+        self.assertIsNotNone(result)
+        self.assertIn("} as never)", result)
+        self.assertIn("buildApp", result)
+    
+    def test_detect_cast_finds_as_any_paren(self) -> None:
+        """detect_full_arg_cast detecta '} as any)' en línea nueva y retorna esa línea."""
+        test_file = self.repo_root / "test" / "cast_any.test.ts"
+        test_file.write_text(
+            "import { test } from 'vitest';\n"
+            "import { buildApp } from '../src/app.js';\n"
+            "\n"
+            "test('cast any', () => {\n"
+            "  buildApp({ port: 3000 } as any);\n"
+            "});\n"
+        )
+        
+        def mock_run_cmd(cmd, cwd=None, timeout=None):
+            from types import SimpleNamespace
+            if "git" in cmd and "ls-files" in cmd:
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+        
+        result = tdd_runner.detect_full_arg_cast(
+            str(self.repo_root),
+            ["test/cast_any.test.ts"],
+            mock_run_cmd
+        )
+        
+        self.assertIsNotNone(result)
+        self.assertIn("} as any)", result)
+    
+    def test_detect_cast_finds_as_unknown_as_ident_paren(self) -> None:
+        """detect_full_arg_cast detecta '} as unknown as BuildAppOptions)' en línea nueva y retorna esa línea."""
+        test_file = self.repo_root / "test" / "cast_unknown.test.ts"
+        test_file.write_text(
+            "import { test } from 'vitest';\n"
+            "import { buildApp } from '../src/app.js';\n"
+            "\n"
+            "test('cast unknown', () => {\n"
+            "  buildApp({ port: 3000 } as unknown as BuildAppOptions);\n"
+            "});\n"
+        )
+        
+        def mock_run_cmd(cmd, cwd=None, timeout=None):
+            from types import SimpleNamespace
+            if "git" in cmd and "ls-files" in cmd:
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+        
+        result = tdd_runner.detect_full_arg_cast(
+            str(self.repo_root),
+            ["test/cast_unknown.test.ts"],
+            mock_run_cmd
+        )
+        
+        self.assertIsNotNone(result)
+        self.assertIn("} as unknown as BuildAppOptions)", result)
+    
+    def test_detect_cast_ignores_property_cast(self) -> None:
+        """detect_full_arg_cast retorna None para '  db: mockDb as never,' (sin ')' cerrando argumento)."""
+        test_file = self.repo_root / "test" / "prop_cast.test.ts"
+        test_file.write_text(
+            "import { test } from 'vitest';\n"
+            "import { buildApp } from '../src/app.js';\n"
+            "\n"
+            "test('prop cast', () => {\n"
+            "  buildApp({\n"
+            "    db: mockDb as never,\n"
+            "    port: 3000\n"
+            "  });\n"
+            "});\n"
+        )
+        
+        def mock_run_cmd(cmd, cwd=None, timeout=None):
+            from types import SimpleNamespace
+            if "git" in cmd and "ls-files" in cmd:
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+        
+        result = tdd_runner.detect_full_arg_cast(
+            str(self.repo_root),
+            ["test/prop_cast.test.ts"],
+            mock_run_cmd
+        )
+        
+        # Should return None (property cast is allowed)
+        self.assertIsNone(result)
+    
+    def test_detect_cast_ignores_variable_cast(self) -> None:
+        """detect_full_arg_cast retorna None para '  const x = fakeDb as never;'."""
+        test_file = self.repo_root / "test" / "var_cast.test.ts"
+        test_file.write_text(
+            "import { test } from 'vitest';\n"
+            "import { buildApp } from '../src/app.js';\n"
+            "\n"
+            "test('var cast', () => {\n"
+            "  const x = fakeDb as never;\n"
+            "  buildApp({ db: x, port: 3000 });\n"
+            "});\n"
+        )
+        
+        def mock_run_cmd(cmd, cwd=None, timeout=None):
+            from types import SimpleNamespace
+            if "git" in cmd and "ls-files" in cmd:
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+        
+        result = tdd_runner.detect_full_arg_cast(
+            str(self.repo_root),
+            ["test/var_cast.test.ts"],
+            mock_run_cmd
+        )
+        
+        # Should return None (variable cast is allowed)
+        self.assertIsNone(result)
+    
+    def test_detect_cast_untracked_file_with_cast_detected(self) -> None:
+        """archivo de test nuevo (sin trackear) con 'buildApp({ db } as never)' en cualquier línea → detect_full_arg_cast retorna esa línea."""
+        # Create untracked file with cast on line 5
+        test_file = self.repo_root / "test" / "untracked_cast.test.ts"
+        test_file.write_text(
+            "import { test } from 'vitest';\n"
+            "import { buildApp } from '../src/app.js';\n"
+            "\n"
+            "test('untracked', () => {\n"
+            "  buildApp({ db } as never);\n"
+            "});\n"
+        )
+        
+        def mock_run_cmd(cmd, cwd=None, timeout=None):
+            from types import SimpleNamespace
+            # File is untracked
+            if "git" in cmd and "ls-files" in cmd:
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+        
+        result = tdd_runner.detect_full_arg_cast(
+            str(self.repo_root),
+            ["test/untracked_cast.test.ts"],
+            mock_run_cmd
+        )
+        
+        # Should detect the cast on any line
+        self.assertIsNotNone(result)
+        self.assertIn("} as never)", result)
+    
+    def test_detect_cast_tracked_existing_line_ignored(self) -> None:
+        """archivo trackeado donde la línea '} as never)' ya existía en HEAD (no es '+') → detect_full_arg_cast retorna None."""
+        # Create and commit file with cast
+        test_file = self.repo_root / "test" / "tracked_old_cast.test.ts"
+        test_file.write_text(
+            "import { test } from 'vitest';\n"
+            "import { buildApp } from '../src/app.js';\n"
+            "\n"
+            "test('old cast', () => {\n"
+            "  buildApp({ db } as never);\n"
+            "});\n"
+        )
+        subprocess.run(["git", "add", str(test_file)], cwd=self.repo_root, check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "Add test with cast"], cwd=self.repo_root, check=True, capture_output=True)
+        
+        # Don't modify file - the cast line is already committed
+        
+        result = tdd_runner.detect_full_arg_cast(
+            str(self.repo_root),
+            ["test/tracked_old_cast.test.ts"],
+            self._run
+        )
+        
+        # Should return None (cast was already in HEAD)
+        self.assertIsNone(result)
+    
+    def test_red_phase_rejects_full_arg_cast_with_feedback(self) -> None:
+        """run_red_phase con coder que escribe '} as never)' → output contiene feedback citando la línea; coder es invocado de nuevo en el siguiente intento."""
+        # Setup directories
+        (self.repo_root / "tests").mkdir()
+        (self.repo_root / "src").mkdir()
+        (self.repo_root / "docs" / "specs").mkdir(parents=True)
+        (self.repo_root / ".backlog" / "runs" / "issue-35").mkdir(parents=True)
+        
+        # Create spec
+        spec = {
+            "summary": "Test cast detection",
+            "decisions": [],
+            "tasks": [
+                {
+                    "id": "T1",
+                    "title": "Test cast rejection",
+                    "description": "Test description",
+                    "tests": [{"file": "tests/test_cast_reject.py", "name": "test_cast", "asserts": "assert False"}],
+                    "impl_files": ["src/cast.py"]
+                }
+            ]
+        }
+        
+        task = spec["tasks"][0]
+        
+        # Create spec file
+        spec_path = self.repo_root / "docs" / "specs" / "issue-35.md"
+        spec_content = """---
+issue: 35
+status: approved
+test_command: python3 -m unittest discover -s tests -v
+---
+
+# Test spec
+
+## Tareas
+
+### T1: Test cast rejection
+
+**Tests:**
+- `tests/test_cast_reject.py::test_cast`: assert False
+
+**Archivos de implementación:**
+- `src/cast.py`
+
+**Progreso:**
+- [ ] RED: tests escritos y fallan
+"""
+        spec_path.write_text(spec_content)
+        subprocess.run(["git", "add", str(spec_path)], cwd=self.repo_root, check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "docs: spec"], cwd=self.repo_root, check=True, capture_output=True)
+        
+        # Track coder calls
+        coder_calls = []
+        
+        def fake_coder_with_cast(prompt: str, log_path: str) -> tuple[int, str]:
+            call_num = len(coder_calls)
+            coder_calls.append({"prompt": prompt})
+            
+            test_file_path = self.repo_root / "tests" / "test_cast_reject.py"
+            
+            if call_num == 0:
+                # First call: write code with prohibited cast
+                # Using Python syntax for simplicity, but pattern is same
+                test_file_path.write_text(
+                    "import unittest\n"
+                    "# buildApp({ db } as never)\n"  # Pattern that should be detected
+                    "class TestCast(unittest.TestCase):\n"
+                    "    def test_cast(self):\n"
+                    "        assert False\n"
+                )
+                return 0, "Tests with cast"
+            else:
+                # Second call: write valid code without cast
+                test_file_path.write_text(
+                    "import unittest\n"
+                    "class TestCast(unittest.TestCase):\n"
+                    "    def test_cast(self):\n"
+                    "        assert False\n"
+                )
+                return 0, "Tests without cast"
+        
+        # Capture print output
+        print_output = []
+        def mock_print(msg: str) -> None:
+            print_output.append(msg)
+        
+        logs_dir = self.repo_root / ".backlog" / "runs" / "issue-35"
+        
+        # Run RED phase
+        result = tdd_runner.run_red_phase(
+            repo_root=str(self.repo_root),
+            issue_num=35,
+            task=task,
+            spec=spec,
+            spec_path=spec_path,
+            test_cmd=["python3", "-m", "unittest", "discover", "-s", "tests", "-v"],
+            logs_dir=logs_dir,
+            coder=fake_coder_with_cast,
+            run_cmd=self._run,
+            input_fn=lambda p: "",
+            print_fn=mock_print
+        )
+        
+        # Should succeed after retry
+        self.assertTrue(result)
+        
+        # Should have made 2 coder calls
+        self.assertEqual(len(coder_calls), 2)
+        
+        # Print output should contain feedback about cast detection
+        all_output = "\n".join(print_output)
+        # Should mention the prohibited pattern
+        self.assertTrue(
+            "} as never)" in all_output or
+            "cast" in all_output.lower() or
+            "prohibido" in all_output.lower(),
+            f"Output should mention cast rejection. Output: {all_output}"
+        )
+
+
 class TestNoRevertBetweenStaticAttempts(unittest.TestCase):
     """Test that static check failures don't revert between attempts (T4)."""
     

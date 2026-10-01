@@ -130,7 +130,7 @@ get_new_lines(repo_root, file, run_cmd): líneas '+' de git diff HEAD para track
 - `scripts/tdd_runner.py`
 
 **Progreso:**
-- [ ] RED: tests escritos y fallan
+- [x] RED: tests escritos y fallan
 - [ ] GREEN: tests pasan
 - [ ] REFACTOR: código limpio
 
