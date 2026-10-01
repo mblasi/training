@@ -73,6 +73,77 @@ def is_dependency_infra_file(path: str) -> bool:
     return False
 
 
+def extract_ts_error_type_name(error_code: str, error_message: str) -> str | None:
+    """
+    Extract the named type from a TypeScript error message.
+    
+    For TS2353: extracts type name from "in type X" pattern
+    For TS2345: extracts type name from "parameter of type X" pattern
+    For other codes (TS2554, TS2339, TS2551, TS2741, TS2307, etc.): returns None
+    
+    Args:
+        error_code: The TypeScript error code (e.g. "TS2353")
+        error_message: The error message text
+    
+    Returns:
+        The type name if found, None otherwise
+    """
+    if error_code == "TS2353":
+        # Pattern: "in type X"
+        match = re.search(r"\bin type '([^']+)'", error_message)
+        if match:
+            return match.group(1)
+    
+    elif error_code == "TS2345":
+        # Pattern: "parameter of type X"
+        match = re.search(r"\bparameter of type '([^']+)'", error_message)
+        if match:
+            return match.group(1)
+    
+    return None
+
+
+def type_declared_in_impl_files(type_name: str, impl_files: list[str], repo_root: str) -> bool:
+    """
+    Check if a type name is declared in any of the impl_files.
+    
+    Searches for interface, type alias, or class declarations matching the type name.
+    Matches both with and without export keyword.
+    
+    Args:
+        type_name: The type name to search for
+        impl_files: List of implementation file paths (relative to repo_root)
+        repo_root: Absolute path to repository root
+    
+    Returns:
+        True if the type is declared in any impl_file, False otherwise
+    """
+    if not impl_files:
+        return False
+    
+    # Pattern to match interface, type, or class declarations
+    # Matches: interface X, export interface X, type X, export type X, class X, export class X
+    pattern = re.compile(
+        rf"^\s*(export\s+)?(interface|type|class)\s+{re.escape(type_name)}\b",
+        re.MULTILINE
+    )
+    
+    for file_path in impl_files:
+        full_path = Path(repo_root) / file_path
+        if not full_path.exists():
+            continue
+        
+        try:
+            content = full_path.read_text(encoding="utf-8")
+            if pattern.search(content):
+                return True
+        except Exception:
+            # Skip files that can't be read
+            continue
+    
+    return False
+
+
 def build_coder_cmd(prompt: str, env: dict[str, str] | None = None) -> list[str]:
     """
     Build coder command from environment configuration.
