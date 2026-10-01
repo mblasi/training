@@ -1824,6 +1824,31 @@ test_command: sh -c "exit 1"
             cwd = self.repo_root
         return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout, check=False)
     
+    def _run_cmd_simulating_tsc(self, cmd: list[str], cwd: str | None = None, timeout: int | None = None) -> subprocess.CompletedProcess:
+        """Run command simulating tsc and eslint for E2E test."""
+        from types import SimpleNamespace
+        
+        cmd_str = " ".join(cmd)
+        
+        # Simulate tsc
+        if "tsc" in cmd_str:
+            return SimpleNamespace(
+                returncode=1,
+                stdout="apps/api/test/auth.test.ts(6,5): error TS2353: Object literal may only specify known properties, and 'extraProp' does not exist in type 'BuildAppOptions'.",
+                stderr=""
+            )
+        
+        # Simulate eslint
+        if "eslint" in cmd_str:
+            return SimpleNamespace(
+                returncode=0,
+                stdout="",
+                stderr=""
+            )
+        
+        # Delegate to real subprocess for git and test commands
+        return self._run(cmd, cwd=cwd, timeout=timeout or 10)
+    
     def test_e2e_red_new_signature_commits_both_files(self) -> None:
         """repo git real con impl_file que declara 'interface BuildAppOptions' con prop nueva; coder actualiza test existente trackeado y crea test nuevo; TS2353 aceptado (tipo en impl_file); RED retorna True; git log contiene commit de test; ambos archivos de test presentes y no revertidos."""
         # Create spec
@@ -1893,7 +1918,7 @@ test('new test', () => {
             test_cmd=["sh", "-c", "exit 1"],  # Fake test that always fails (as expected in RED)
             logs_dir=logs_dir,
             coder=fake_coder_e2e,
-            run_cmd=self._run,
+            run_cmd=self._run_cmd_simulating_tsc,
             input_fn=lambda p: "",
             print_fn=lambda m: None
         )
