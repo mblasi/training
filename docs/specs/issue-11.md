@@ -192,7 +192,7 @@ Crear src/plugins/auth.ts, src/plugins/requireAdmin.ts, src/types/fastify.d.ts; 
 - `apps/api/src/app.ts`
 
 **Progreso:**
-- [ ] RED: tests escritos y fallan
+- [x] RED: tests escritos y fallan
 - [ ] GREEN: tests pasan
 - [ ] REFACTOR: código limpio
 
