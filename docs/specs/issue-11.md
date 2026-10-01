@@ -200,7 +200,7 @@ Crear src/plugins/auth.ts (createAuthHook), src/plugins/requireAdmin.ts, src/typ
 
 **Progreso:**
 - [x] RED: tests escritos y fallan
-- [ ] GREEN: tests pasan
+- [x] GREEN: tests pasan
 - [ ] REFACTOR: código limpio
 
 ### T6: API: inicialización firebase-admin en src/index.ts
