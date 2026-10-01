@@ -131,7 +131,7 @@ get_new_lines(repo_root, file, run_cmd): líneas '+' de git diff HEAD para track
 
 **Progreso:**
 - [x] RED: tests escritos y fallan
-- [ ] GREEN: tests pasan
+- [x] GREEN: tests pasan
 - [ ] REFACTOR: código limpio
 
 ### T6: Regla 7 en build_red_prompt sobre actualización de firma

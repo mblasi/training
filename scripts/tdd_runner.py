@@ -382,6 +382,102 @@ def is_signature_error_acceptable(error_code: str, error_line: str, test_file: s
     return False
 
 
+def get_new_lines(repo_root: str, file: str, run_cmd: Callable) -> list[str]:
+    """
+    Get new lines in a file.
+    
+    For tracked files: returns only lines starting with '+' from 'git diff HEAD'.
+    For untracked files: returns all lines.
+    
+    Args:
+        repo_root: Repository root path
+        file: File path (relative to repo_root)
+        run_cmd: Command runner function
+    
+    Returns:
+        List of new lines (stripped of leading '+' for tracked files)
+    """
+    # Check if file is tracked
+    result = run_cmd(
+        ["git", "ls-files", file],
+        cwd=repo_root,
+        timeout=5
+    )
+    
+    is_tracked = bool(result.stdout.strip())
+    
+    if not is_tracked:
+        # Untracked file: return all lines
+        file_path = Path(repo_root) / file
+        if not file_path.exists():
+            return []
+        
+        try:
+            content = file_path.read_text(encoding="utf-8")
+            return content.splitlines()
+        except Exception:
+            return []
+    else:
+        # Tracked file: return only added lines from diff HEAD
+        result = run_cmd(
+            ["git", "diff", "HEAD", file],
+            cwd=repo_root,
+            timeout=5
+        )
+        
+        if result.returncode != 0:
+            return []
+        
+        new_lines = []
+        for line in result.stdout.splitlines():
+            if line.startswith("+") and not line.startswith("+++"):
+                # Strip leading '+' and add to list
+                new_lines.append(line[1:])
+        
+        return new_lines
+
+
+def detect_full_arg_cast(repo_root: str, test_files: list[str], run_cmd: Callable) -> str | None:
+    """
+    Detect prohibited type casts over full arguments in test files.
+    
+    Checks new lines (from get_new_lines) for patterns:
+    - } as never)
+    - } as any)
+    - } as unknown as <ident>)
+    
+    These patterns indicate casting the entire argument object to bypass type checks,
+    which is prohibited. Property casts (e.g. 'db: mockDb as never,') and variable
+    casts (e.g. 'const x = fakeDb as never;') are allowed.
+    
+    Args:
+        repo_root: Repository root path
+        test_files: List of test file paths (relative to repo_root)
+        run_cmd: Command runner function
+    
+    Returns:
+        The first problematic line found, or None if no issues
+    """
+    import re
+    
+    # Patterns to detect (all require closing paren)
+    patterns = [
+        r"\}\s+as\s+never\s*\)",
+        r"\}\s+as\s+any\s*\)",
+        r"\}\s+as\s+unknown\s+as\s+\w+\s*\)",
+    ]
+    
+    for test_file in test_files:
+        new_lines = get_new_lines(repo_root, test_file, run_cmd)
+        
+        for line in new_lines:
+            for pattern in patterns:
+                if re.search(pattern, line):
+                    return line
+    
+    return None
+
+
 def check_test_files_static(repo_root: str, test_files: list[str], run_cmd: Callable, impl_files: list[str] | None = None) -> str | None:
     """
     Check test files for static errors (lint, typecheck, syntax).
@@ -1274,6 +1370,30 @@ def run_red_phase(
                 if user_choice == "abortar":
                     return False
                 break
+        
+        # Check for prohibited full-argument casts (D3)
+        changed_test_files = [f for f in changed if is_test_file(f)]
+        if changed_test_files:
+            cast_line = detect_full_arg_cast(repo_root, changed_test_files, run_cmd)
+            if cast_line:
+                print_fn(f"Error: cast prohibido sobre argumento completo detectado:")
+                print_fn(f"  {cast_line}")
+                print_fn("No uses casts '} as never)', '} as any)' o '} as unknown as X)' sobre el argumento completo.")
+                
+                # Revert changes
+                if changed:
+                    revert_files(repo_root, changed, run_cmd)
+                
+                if attempt < max_attempts - 1:
+                    print_fn("Reintentando RED...\n")
+                    last_feedback = f"Cast prohibido detectado en línea:\n\n  {cast_line}\n\nNo uses casts '}} as never)', '}} as any)' o '}} as unknown as X)' sobre el argumento completo."
+                    attempt += 1
+                    continue
+                else:
+                    user_choice = input_fn("Continuar o abortar? (continuar/abortar): ").strip().lower()
+                    if user_choice == "abortar":
+                        return False
+                    break
         
         # Run tests (must FAIL)
         print_fn("Ejecutando tests...")
