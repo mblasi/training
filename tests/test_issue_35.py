@@ -1727,5 +1727,342 @@ class TestBuildRedPromptFirmaRule(unittest.TestCase):
         )
 
 
+class TestE2ERedNewSignature(unittest.TestCase):
+    """E2E tests for run_red_phase with real git repo (T7)."""
+    
+    def setUp(self) -> None:
+        """Create temp git repository for e2e testing."""
+        self.temp_dir = tempfile.mkdtemp(prefix="test_e2e_red_")
+        self.repo_root = Path(self.temp_dir)
+        
+        # Initialize git repo
+        subprocess.run(["git", "init"], cwd=self.repo_root, check=True, capture_output=True)
+        subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=self.repo_root, check=True, capture_output=True)
+        subprocess.run(["git", "config", "user.name", "Test User"], cwd=self.repo_root, check=True, capture_output=True)
+        
+        # Create initial commit
+        readme = self.repo_root / "README.md"
+        readme.write_text("# Test repo")
+        subprocess.run(["git", "add", "."], cwd=self.repo_root, check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "Initial commit"], cwd=self.repo_root, check=True, capture_output=True)
+        
+        # Create directories
+        (self.repo_root / "apps" / "api" / "test").mkdir(parents=True)
+        (self.repo_root / "apps" / "api" / "src").mkdir(parents=True)
+        (self.repo_root / "docs" / "specs").mkdir(parents=True)
+        (self.repo_root / ".backlog" / "runs" / "issue-35").mkdir(parents=True)
+        
+        # Create and commit package.json and tsconfig.json (scaffolding)
+        package_json = self.repo_root / "apps" / "api" / "package.json"
+        package_json.write_text('{"name": "api"}')
+        
+        tsconfig = self.repo_root / "apps" / "api" / "tsconfig.json"
+        tsconfig.write_text('{"compilerOptions": {"strict": true}}')
+        
+        # Create and commit impl_file with interface
+        impl_file = self.repo_root / "apps" / "api" / "src" / "app.ts"
+        impl_file.write_text("""
+export interface BuildAppOptions {
+    port: number;
+    enableAuth: boolean;  // New property
+}
+
+export function buildApp(opts: BuildAppOptions) {
+    // ...
+}
+""")
+        
+        # Create and commit existing test file
+        existing_test = self.repo_root / "apps" / "api" / "test" / "auth.test.ts"
+        existing_test.write_text("""
+import { test } from 'vitest';
+import { buildApp } from '../src/app.js';
+
+test('auth existing', () => {
+    buildApp({ port: 3000 });  // Missing enableAuth
+});
+""")
+        
+        # Create spec
+        spec_path = self.repo_root / "docs" / "specs" / "issue-35.md"
+        spec_content = """---
+issue: 35
+status: approved
+test_command: sh -c "exit 1"
+---
+
+# Test spec
+
+## Tareas
+
+### T1: Test task e2e
+
+**Tests:**
+- `apps/api/test/auth.test.ts::auth existing`: updated with enableAuth
+- `apps/api/test/new.test.ts::new test`: buildApp with enableAuth
+
+**Archivos de implementación:**
+- `apps/api/src/app.ts`
+
+**Progreso:**
+- [ ] RED: tests escritos y fallan
+"""
+        spec_path.write_text(spec_content)
+        
+        # Commit all scaffolding
+        subprocess.run(["git", "add", "."], cwd=self.repo_root, check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "Add scaffolding"], cwd=self.repo_root, check=True, capture_output=True)
+    
+    def tearDown(self) -> None:
+        """Clean up temp directory."""
+        import shutil
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+    
+    def _run(self, cmd: list[str], cwd: str | None = None, timeout: int = 10) -> subprocess.CompletedProcess:
+        """Helper to run command."""
+        if cwd is None:
+            cwd = self.repo_root
+        return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout, check=False)
+    
+    def test_e2e_red_new_signature_commits_both_files(self) -> None:
+        """repo git real con impl_file que declara 'interface BuildAppOptions' con prop nueva; coder actualiza test existente trackeado y crea test nuevo; TS2353 aceptado (tipo en impl_file); RED retorna True; git log contiene commit de test; ambos archivos de test presentes y no revertidos."""
+        # Create spec
+        spec = {
+            "summary": "Test e2e with new signature",
+            "decisions": [],
+            "tasks": [
+                {
+                    "id": "T1",
+                    "title": "Test task e2e",
+                    "description": "Test description",
+                    "tests": [
+                        {
+                            "file": "apps/api/test/auth.test.ts",
+                            "name": "auth existing",
+                            "asserts": "updated with enableAuth"
+                        },
+                        {
+                            "file": "apps/api/test/new.test.ts",
+                            "name": "new test",
+                            "asserts": "buildApp with enableAuth"
+                        }
+                    ],
+                    "impl_files": ["apps/api/src/app.ts"]
+                }
+            ]
+        }
+        
+        task = spec["tasks"][0]
+        spec_path = self.repo_root / "docs" / "specs" / "issue-35.md"
+        
+        # Fake coder that writes valid tests with TS2353 errors
+        def fake_coder_e2e(prompt: str, log_path: str) -> tuple[int, str]:
+            # Update existing test
+            existing_test = self.repo_root / "apps" / "api" / "test" / "auth.test.ts"
+            existing_test.write_text("""
+import { test } from 'vitest';
+import { buildApp } from '../src/app.js';
+
+test('auth existing', () => {
+    buildApp({ port: 3000, enableAuth: true });  // Updated
+});
+""")
+            
+            # Create new test
+            new_test = self.repo_root / "apps" / "api" / "test" / "new.test.ts"
+            new_test.write_text("""
+import { test } from 'vitest';
+import { buildApp } from '../src/app.js';
+
+test('new test', () => {
+    buildApp({ port: 4000, enableAuth: false });
+});
+""")
+            
+            return 0, "Tests written"
+        
+        logs_dir = self.repo_root / ".backlog" / "runs" / "issue-35"
+        
+        # Run RED phase
+        result = tdd_runner.run_red_phase(
+            repo_root=str(self.repo_root),
+            issue_num=35,
+            task=task,
+            spec=spec,
+            spec_path=spec_path,
+            test_cmd=["sh", "-c", "exit 1"],  # Fake test that always fails (as expected in RED)
+            logs_dir=logs_dir,
+            coder=fake_coder_e2e,
+            run_cmd=self._run,
+            input_fn=lambda p: "",
+            print_fn=lambda m: None
+        )
+        
+        # Should return True (tests pass the checks)
+        self.assertTrue(result, "run_red_phase should return True when tests are valid")
+        
+        # Check git log for test commit
+        log_result = self._run(["git", "log", "--oneline", "--grep", "test: Test task e2e (#35)", "--fixed-strings"])
+        self.assertIn("test: Test task e2e (#35)", log_result.stdout,
+                     "Git log should contain test commit")
+        
+        # Both test files should exist and not be reverted
+        existing_test = self.repo_root / "apps" / "api" / "test" / "auth.test.ts"
+        new_test = self.repo_root / "apps" / "api" / "test" / "new.test.ts"
+        
+        self.assertTrue(existing_test.exists(), "Existing test file should exist")
+        self.assertTrue(new_test.exists(), "New test file should exist")
+        
+        # Check that they contain the updated code
+        existing_content = existing_test.read_text()
+        new_content = new_test.read_text()
+        
+        self.assertIn("enableAuth: true", existing_content, "Existing test should be updated")
+        self.assertIn("enableAuth: false", new_content, "New test should contain enableAuth")
+
+
+class TestE2ERedExhaustedStaticAttempts(unittest.TestCase):
+    """E2E test for run_red_phase with exhausted static attempts and full revert (T7)."""
+    
+    def setUp(self) -> None:
+        """Create temp git repository for e2e testing."""
+        self.temp_dir = tempfile.mkdtemp(prefix="test_e2e_red_exhausted_")
+        self.repo_root = Path(self.temp_dir)
+        
+        # Initialize git repo
+        subprocess.run(["git", "init"], cwd=self.repo_root, check=True, capture_output=True)
+        subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=self.repo_root, check=True, capture_output=True)
+        subprocess.run(["git", "config", "user.name", "Test User"], cwd=self.repo_root, check=True, capture_output=True)
+        
+        # Create initial commit
+        readme = self.repo_root / "README.md"
+        readme.write_text("# Test repo")
+        subprocess.run(["git", "add", "."], cwd=self.repo_root, check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "Initial commit"], cwd=self.repo_root, check=True, capture_output=True)
+        
+        # Create directories
+        (self.repo_root / "tests").mkdir()
+        (self.repo_root / "src").mkdir()
+        (self.repo_root / "docs" / "specs").mkdir(parents=True)
+        (self.repo_root / ".backlog" / "runs" / "issue-35").mkdir(parents=True)
+        
+        # Create spec
+        spec_path = self.repo_root / "docs" / "specs" / "issue-35.md"
+        spec_content = """---
+issue: 35
+status: approved
+test_command: python3 -m unittest discover -s tests -v
+---
+
+# Test spec
+
+## Tareas
+
+### T1: Test exhausted
+
+**Tests:**
+- `tests/test_exhausted.py::test_exhausted`: assert False
+
+**Archivos de implementación:**
+- `src/exhausted.py`
+
+**Progreso:**
+- [ ] RED: tests escritos y fallan
+"""
+        spec_path.write_text(spec_content)
+        
+        # Commit spec
+        subprocess.run(["git", "add", "."], cwd=self.repo_root, check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "Add spec"], cwd=self.repo_root, check=True, capture_output=True)
+    
+    def tearDown(self) -> None:
+        """Clean up temp directory."""
+        import shutil
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+    
+    def _run(self, cmd: list[str], cwd: str | None = None, timeout: int = 10) -> subprocess.CompletedProcess:
+        """Helper to run command."""
+        if cwd is None:
+            cwd = self.repo_root
+        return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout, check=False)
+    
+    def test_e2e_red_exhausted_static_attempts_reverts_all(self) -> None:
+        """run_red_phase con falla estática persistente en todos los intentos y usuario elige 'abortar': git status queda limpio (sin archivos modificados)."""
+        # Create spec
+        spec = {
+            "summary": "Test exhausted static attempts",
+            "decisions": [],
+            "tasks": [
+                {
+                    "id": "T1",
+                    "title": "Test exhausted",
+                    "description": "Test description",
+                    "tests": [{"file": "tests/test_exhausted.py", "name": "test_exhausted", "asserts": "assert False"}],
+                    "impl_files": ["src/exhausted.py"]
+                }
+            ]
+        }
+        
+        task = spec["tasks"][0]
+        spec_path = self.repo_root / "docs" / "specs" / "issue-35.md"
+        
+        # Fake coder that always writes invalid syntax
+        def fake_coder_always_invalid(prompt: str, log_path: str) -> tuple[int, str]:
+            test_file_path = self.repo_root / "tests" / "test_exhausted.py"
+            test_file_path.write_text("def test_exhausted(\n")  # Missing closing paren
+            return 0, "Tests written (always invalid)"
+        
+        # Mock input_fn to return 'abortar' when asked
+        def mock_input(prompt: str) -> str:
+            if "Continuar o abortar" in prompt:
+                return "abortar"
+            return ""
+        
+        logs_dir = self.repo_root / ".backlog" / "runs" / "issue-35"
+        
+        # Run RED phase
+        result = tdd_runner.run_red_phase(
+            repo_root=str(self.repo_root),
+            issue_num=35,
+            task=task,
+            spec=spec,
+            spec_path=spec_path,
+            test_cmd=["python3", "-m", "unittest", "discover", "-s", "tests", "-v"],
+            logs_dir=logs_dir,
+            coder=fake_coder_always_invalid,
+            run_cmd=self._run,
+            input_fn=mock_input,
+            print_fn=lambda m: None
+        )
+        
+        # Should return False (aborted)
+        self.assertFalse(result, "run_red_phase should return False when user aborts")
+        
+        # Git status should be clean (all files reverted)
+        status_result = self._run(["git", "status", "--porcelain"])
+        self.assertEqual(status_result.stdout.strip(), "", 
+                        "Git working tree should be clean after aborting exhausted attempts")
+
+
+class TestAgentsMdDocumentation(unittest.TestCase):
+    """Test AGENTS.md documentation includes new error handling logic (T7)."""
+    
+    def test_agents_md_mentions_ts2353(self) -> None:
+        """AGENTS.md contiene la cadena 'TS2353'."""
+        agents_md = Path(__file__).parent.parent / "AGENTS.md"
+        self.assertTrue(agents_md.exists(), "AGENTS.md should exist")
+        
+        content = agents_md.read_text()
+        self.assertIn("TS2353", content, "AGENTS.md should mention TS2353")
+    
+    def test_agents_md_mentions_as_never_cast(self) -> None:
+        """AGENTS.md contiene la cadena 'as never'."""
+        agents_md = Path(__file__).parent.parent / "AGENTS.md"
+        self.assertTrue(agents_md.exists(), "AGENTS.md should exist")
+        
+        content = agents_md.read_text()
+        self.assertIn("as never", content, "AGENTS.md should mention 'as never' cast")
+
+
 if __name__ == "__main__":
     unittest.main()
