@@ -149,7 +149,7 @@ Agregar regla 7 siempre presente en build_red_prompt: actualizar tests existente
 **Progreso:**
 - [x] RED: tests escritos y fallan
 - [x] GREEN: tests pasan
-- [ ] REFACTOR: código limpio
+- [x] REFACTOR: código limpio
 
 ### T7: Test e2e RED: firma nueva + test existente → commit sin revert ni casts
 
