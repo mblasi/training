@@ -73,6 +73,159 @@ def is_dependency_infra_file(path: str) -> bool:
     return False
 
 
+def extract_ts_error_type_name(error_code: str, error_message: str) -> str | None:
+    """
+    Extract the named type from a TypeScript error message.
+    
+    For TS2353: extracts type name from "in type X" pattern
+    For TS2345: extracts type name from "parameter of type X" pattern
+    For other codes (TS2554, TS2339, TS2551, TS2741, TS2307, etc.): returns None
+    
+    Args:
+        error_code: The TypeScript error code (e.g. "TS2353")
+        error_message: The error message text
+    
+    Returns:
+        The type name if found, None otherwise
+    """
+    patterns = {
+        "TS2353": r"\bin type '([^']+)'",
+        "TS2345": r"\bparameter of type '([^']+)'",
+    }
+    
+    if pattern := patterns.get(error_code):
+        if match := re.search(pattern, error_message):
+            return match.group(1)
+    
+    return None
+
+
+def test_imports_impl_file(test_file: str, impl_files: list[str], repo_root: str) -> bool:
+    """
+    Check if a test file imports a module that resolves to any impl_file.
+    
+    Parses static and dynamic import statements, resolves relative paths,
+    and matches against impl_files with extension resolution (.js -> .ts, no ext -> .ts).
+    
+    Args:
+        test_file: Test file path (relative to repo_root)
+        impl_files: List of implementation file paths (relative to repo_root)
+        repo_root: Absolute path to repository root
+    
+    Returns:
+        True if test file imports any impl_file, False otherwise
+    """
+    test_path = Path(repo_root) / test_file
+    
+    if not test_path.exists():
+        return False
+    
+    try:
+        content = test_path.read_text(encoding="utf-8")
+    except Exception:
+        return False
+    
+    # Find all import specifiers (static and dynamic)
+    # Static: import { x } from 'path' or import 'path'
+    # Dynamic: import('path')
+    import_pattern = re.compile(
+        r"""
+        (?:
+            (?:import\s+(?:\{[^}]*\}|\*\s+as\s+\w+|\w+)\s+from\s+['"]([^'"]+)['"])  # static import with specifier
+            |(?:import\s+['"]([^'"]+)['"])  # side-effect import
+            |(?:import\s*\(\s*['"]([^'"]+)['"]\s*\))  # dynamic import
+        )
+        """,
+        re.VERBOSE | re.MULTILINE
+    )
+    
+    matches = import_pattern.findall(content)
+    
+    # Flatten match groups (each match is a tuple of 3 groups, only one is non-empty)
+    import_paths = [m for group in matches for m in group if m]
+    
+    # Resolve each import path
+    test_dir = test_path.parent
+    
+    for import_path in import_paths:
+        # Skip non-relative imports (node_modules)
+        if not import_path.startswith('.'):
+            continue
+        
+        # Resolve relative path
+        resolved = (test_dir / import_path).resolve()
+        
+        # Try multiple extensions for extension resolution
+        # .js -> .ts, no ext -> .ts
+        candidates = []
+        
+        if resolved.suffix == ".js":
+            # Try replacing .js with .ts
+            candidates.append(resolved.with_suffix(".ts"))
+        elif resolved.suffix == "":
+            # Try adding .ts extension
+            candidates.append(resolved.with_suffix(".ts"))
+        else:
+            # Use as-is
+            candidates.append(resolved)
+        
+        # Check if any candidate matches an impl_file
+        for candidate in candidates:
+            # Normalize path to be relative to repo_root
+            try:
+                rel_path = candidate.relative_to(Path(repo_root))
+                normalized = str(rel_path).replace("\\", "/")
+                
+                if normalized in impl_files:
+                    return True
+            except ValueError:
+                # Not relative to repo_root, skip
+                continue
+    
+    return False
+
+
+def type_declared_in_impl_files(type_name: str, impl_files: list[str], repo_root: str) -> bool:
+    """
+    Check if a type name is declared in any of the impl_files.
+    
+    Searches for interface, type alias, or class declarations matching the type name.
+    Matches both with and without export keyword.
+    
+    Args:
+        type_name: The type name to search for
+        impl_files: List of implementation file paths (relative to repo_root)
+        repo_root: Absolute path to repository root
+    
+    Returns:
+        True if the type is declared in any impl_file, False otherwise
+    """
+    if not impl_files:
+        return False
+    
+    # Pattern to match interface, type, or class declarations
+    # Matches: interface X, export interface X, type X, export type X, class X, export class X
+    pattern = re.compile(
+        rf"^\s*(export\s+)?(interface|type|class)\s+{re.escape(type_name)}\b",
+        re.MULTILINE
+    )
+    
+    for file_path in impl_files:
+        full_path = Path(repo_root) / file_path
+        if not full_path.exists():
+            continue
+        
+        try:
+            content = full_path.read_text(encoding="utf-8")
+            if pattern.search(content):
+                return True
+        except Exception:
+            # Skip files that can't be read
+            continue
+    
+    return False
+
+
 def build_coder_cmd(prompt: str, env: dict[str, str] | None = None) -> list[str]:
     """
     Build coder command from environment configuration.
@@ -197,12 +350,144 @@ ACCEPTABLE_TS_ERRORS = {
 }
 
 
-def check_test_files_static(repo_root: str, test_files: list[str], run_cmd: Callable) -> str | None:
+def is_signature_error_acceptable(error_code: str, error_line: str, test_file: str, impl_files: list[str], repo_root: str) -> bool:
+    """
+    Check if a TypeScript signature error should be accepted.
+    
+    Extended acceptance for signature-related errors (D1):
+    - TS2353, TS2345: accepted if the named type is declared in any impl_file
+    - TS2554, TS2339, TS2551, TS2741: accepted if the test file imports any impl_file
+    
+    Args:
+        error_code: The TypeScript error code (e.g. "TS2353")
+        error_line: The full error line from tsc output
+        test_file: Test file path (relative to repo_root)
+        impl_files: List of implementation file paths (relative to repo_root)
+        repo_root: Repository root path
+    
+    Returns:
+        True if error should be accepted, False otherwise
+    """
+    # Codes with named types: extract type and check if declared in impl_files
+    if error_code in ("TS2353", "TS2345"):
+        type_name = extract_ts_error_type_name(error_code, error_line)
+        if type_name:
+            return type_declared_in_impl_files(type_name, impl_files, repo_root)
+        return False
+    
+    # Codes without named types: check if test imports any impl_file
+    if error_code in ("TS2554", "TS2339", "TS2551", "TS2741"):
+        return test_imports_impl_file(test_file, impl_files, repo_root)
+    
+    return False
+
+
+def get_new_lines(repo_root: str, file: str, run_cmd: Callable) -> list[str]:
+    """
+    Get new lines in a file.
+    
+    For tracked files: returns only lines starting with '+' from 'git diff HEAD'.
+    For untracked files: returns all lines.
+    
+    Args:
+        repo_root: Repository root path
+        file: File path (relative to repo_root)
+        run_cmd: Command runner function
+    
+    Returns:
+        List of new lines (stripped of leading '+' for tracked files)
+    """
+    # Check if file is tracked
+    result = run_cmd(
+        ["git", "ls-files", file],
+        cwd=repo_root,
+        timeout=5
+    )
+    
+    is_tracked = bool(result.stdout.strip())
+    
+    if not is_tracked:
+        # Untracked file: return all lines
+        file_path = Path(repo_root) / file
+        if not file_path.exists():
+            return []
+        
+        try:
+            content = file_path.read_text(encoding="utf-8")
+            return content.splitlines()
+        except Exception:
+            return []
+    else:
+        # Tracked file: return only added lines from diff HEAD
+        result = run_cmd(
+            ["git", "diff", "HEAD", file],
+            cwd=repo_root,
+            timeout=5
+        )
+        
+        if result.returncode != 0:
+            return []
+        
+        new_lines = []
+        for line in result.stdout.splitlines():
+            if line.startswith("+") and not line.startswith("+++"):
+                # Strip leading '+' and add to list
+                new_lines.append(line[1:])
+        
+        return new_lines
+
+
+def detect_full_arg_cast(repo_root: str, test_files: list[str], run_cmd: Callable) -> str | None:
+    """
+    Detect prohibited type casts over full arguments in test files.
+    
+    Checks new lines (from get_new_lines) for patterns:
+    - } as never)
+    - } as any)
+    - } as unknown as <ident>)
+    
+    These patterns indicate casting the entire argument object to bypass type checks,
+    which is prohibited. Property casts (e.g. 'db: mockDb as never,') and variable
+    casts (e.g. 'const x = fakeDb as never;') are allowed.
+    
+    Args:
+        repo_root: Repository root path
+        test_files: List of test file paths (relative to repo_root)
+        run_cmd: Command runner function
+    
+    Returns:
+        The first problematic line found, or None if no issues
+    """
+    import re
+    
+    # Patterns to detect (all require closing paren)
+    patterns = [
+        r"\}\s+as\s+never\s*\)",
+        r"\}\s+as\s+any\s*\)",
+        r"\}\s+as\s+unknown\s+as\s+\w+\s*\)",
+    ]
+    
+    for test_file in test_files:
+        new_lines = get_new_lines(repo_root, test_file, run_cmd)
+        
+        for line in new_lines:
+            for pattern in patterns:
+                if re.search(pattern, line):
+                    return line
+    
+    return None
+
+
+def check_test_files_static(repo_root: str, test_files: list[str], run_cmd: Callable, impl_files: list[str] | None = None) -> str | None:
     """
     Check test files for static errors (lint, typecheck, syntax).
     
     For TS/JS test files: runs ESLint and TypeScript compiler in their workspace.
     For Python test files: runs py_compile.
+    
+    With impl_files parameter: extends acceptable TS errors to include signature errors
+    (TS2353, TS2345, TS2554, TS2339, TS2551, TS2741) when the type is declared in impl_files
+    or the test imports an impl_file.
     
     Returns None if all checks pass, or a feedback string with tool output if checks fail.
     
@@ -210,6 +495,8 @@ def check_test_files_static(repo_root: str, test_files: list[str], run_cmd: Call
         repo_root: Repository root path
         test_files: List of test file paths (relative to repo_root)
         run_cmd: Command runner function
+        impl_files: Optional list of implementation file paths (relative to repo_root)
+                   for extended error acceptance logic
     
     Returns:
         None if valid, or feedback string with exact tool output if invalid
@@ -343,9 +630,27 @@ def check_test_files_static(repo_root: str, test_files: list[str], run_cmd: Call
                         
                         if is_in_changed_test:
                             # Error in changed test file
-                            if error_code not in ACCEPTABLE_TS_ERRORS:
-                                # Not an acceptable error (missing production code)
-                                invalid_errors.append(line)
+                            if error_code in ACCEPTABLE_TS_ERRORS:
+                                # Always acceptable (missing module/export)
+                                continue
+                            
+                            # Extended acceptance logic when impl_files is provided
+                            if impl_files is not None:
+                                # Reconstruct full path relative to repo_root
+                                # error_file_normalized is relative to workspace, need to make it relative to repo_root
+                                try:
+                                    workspace_rel_to_repo = str(Path(workspace).relative_to(Path(repo_root)))
+                                    full_test_file = str(Path(workspace_rel_to_repo) / error_file_normalized)
+                                except ValueError:
+                                    # workspace not relative to repo_root, shouldn't happen
+                                    full_test_file = error_file_normalized
+                                
+                                # Check if error is signature-related and should be accepted
+                                if is_signature_error_acceptable(error_code, line, full_test_file, impl_files, repo_root):
+                                    continue
+                            
+                            # Not acceptable - add to invalid list
+                            invalid_errors.append(line)
                     
                     if invalid_errors:
                         return f"TypeScript errors in test files:\n" + "\n".join(invalid_errors)
@@ -440,32 +745,41 @@ def get_file_hashes(repo_root: str, files: list[str], run_cmd: Callable) -> dict
 
 
 def revert_files(repo_root: str, files: list[str], run_cmd: Callable) -> None:
-    """Revert specific files to HEAD."""
+    """Revert specific files to HEAD.
+
+    Tracked files are restored with `git checkout --`; untracked ones are deleted.
+    The two groups are handled separately because git aborts the whole checkout
+    when any pathspec is unknown to it.
+    """
     if not files:
         return
-    
-    # Revert tracked changes
-    run_cmd(
-        ["git", "checkout", "--"] + files,
-        cwd=repo_root,
-        timeout=10
-    )
-    
-    # Clean untracked files in those paths
+
+    tracked: list[str] = []
+    untracked: list[str] = []
     for file_path in files:
+        result = run_cmd(
+            ["git", "ls-files", "--", file_path],
+            cwd=repo_root,
+            timeout=5
+        )
+        if result.stdout.strip():
+            tracked.append(file_path)
+        else:
+            untracked.append(file_path)
+
+    if tracked:
+        run_cmd(
+            ["git", "checkout", "--"] + tracked,
+            cwd=repo_root,
+            timeout=10
+        )
+
+    for file_path in untracked:
         full_path = Path(repo_root) / file_path
-        if full_path.exists():
-            result = run_cmd(
-                ["git", "ls-files", file_path],
-                cwd=repo_root,
-                timeout=5
-            )
-            # If file is not tracked, remove it
-            if not result.stdout.strip():
-                if full_path.is_dir():
-                    shutil.rmtree(full_path, ignore_errors=True)
-                else:
-                    full_path.unlink(missing_ok=True)
+        if full_path.is_dir() and not full_path.is_symlink():
+            shutil.rmtree(full_path, ignore_errors=True)
+        else:
+            full_path.unlink(missing_ok=True)
 
 
 def detect_desvio(output: str) -> str | None:
@@ -921,6 +1235,17 @@ def run_red_phase(
     last_decision = None  # Decision from last /DESVIO
     desvio_count = 0  # Track /DESVIO count for cap
     
+    def commit_red() -> None:
+        print_fn("Commiteando...")
+        mark_progress(str(spec_path), task_id, "red")
+        run_cmd(["git", "add", "."], cwd=repo_root, timeout=10)
+        run_cmd(
+            ["git", "commit", "-m", f"test: {task['title']} (#{issue_num})"],
+            cwd=repo_root,
+            timeout=10
+        )
+        print_fn("RED completo.\n")
+
     attempt = 0
     while attempt < max_attempts:
         # Build prompt
@@ -1066,6 +1391,34 @@ def run_red_phase(
                     return False
                 break
         
+        # Check for prohibited full-argument casts (D3)
+        changed_test_files = [f for f in changed if is_test_file(f)]
+        if changed_test_files:
+            cast_line = detect_full_arg_cast(repo_root, changed_test_files, run_cmd)
+            if cast_line:
+                print_fn(f"Error: cast prohibido sobre argumento completo detectado:")
+                print_fn(f"  {cast_line}")
+                print_fn("No uses casts '} as never)', '} as any)' o '} as unknown as X)' sobre el argumento completo.")
+                
+                # Do NOT revert between attempts (D2): the coder fixes in place.
+                # Only revert on abort or exhausted attempts.
+                if attempt < max_attempts - 1:
+                    print_fn("Reintentando RED...\n")
+                    last_feedback = f"Cast prohibido detectado en línea:\n\n  {cast_line}\n\nNo uses casts '}} as never)', '}} as any)' o '}} as unknown as X)' sobre el argumento completo. Corregí los archivos de test existentes."
+                    attempt += 1
+                    continue
+                else:
+                    user_choice = input_fn("Continuar o abortar? (continuar/abortar): ").strip().lower()
+                    if user_choice == "abortar":
+                        # Revert all changed files on abort
+                        if changed:
+                            revert_files(repo_root, changed, run_cmd)
+                        return False
+                    # user chose 'continuar': accept the cast and fall through to the
+                    # remaining RED checks (tests must fail, empty run, static check)
+                    print_fn("\n⚠️  ADVERTENCIA: Los tests contienen casts prohibidos sobre el argumento completo.")
+                    print_fn("Se acepta el cast según tu decisión de continuar; se siguen verificando el resto de los checks de RED.\n")
+        
         # Run tests (must FAIL)
         print_fn("Ejecutando tests...")
         test_result = run_cmd(test_cmd, cwd=repo_root, timeout=300)
@@ -1140,15 +1493,14 @@ def run_red_phase(
         changed_test_files = [f for f in changed if is_test_file(f)]
         
         if changed_test_files:
-            static_feedback = check_test_files_static(repo_root, changed_test_files, run_cmd)
+            static_feedback = check_test_files_static(repo_root, changed_test_files, run_cmd, impl_files)
             
             if static_feedback:
                 print_fn("Los tests de RED no pasan lint/typecheck por sí mismos:")
                 print_fn(static_feedback)
                 
-                # Revert and retry with feedback
-                if changed:
-                    revert_files(repo_root, changed, run_cmd)
+                # Do NOT revert between attempts (D2-A)
+                # Only revert on abort or exhausted attempts
                 
                 if attempt < max_attempts - 1:
                     print_fn("\nReintentando RED con feedback...\n")
@@ -1158,23 +1510,18 @@ def run_red_phase(
                 else:
                     user_choice = input_fn("Continuar o abortar? (continuar/abortar): ").strip().lower()
                     if user_choice == "abortar":
+                        # Revert all changed files on abort
+                        if changed:
+                            revert_files(repo_root, changed, run_cmd)
                         return False
-                    break
+                    # user chose 'continuar': commit with warning
+                    print_fn("\n⚠️  ADVERTENCIA: Los tests NO pasan lint/typecheck por sí mismos.")
+                    print_fn("Commiteando de todas formas según tu decisión de continuar.\n")
+                    commit_red()
+                    return True
         
         # All checks passed - commit
-        print_fn("Commiteando...")
-        
-        # Mark RED in spec
-        mark_progress(str(spec_path), task_id, "red")
-        
-        run_cmd(["git", "add", "."], cwd=repo_root, timeout=10)
-        run_cmd(
-            ["git", "commit", "-m", f"test: {task['title']} (#{issue_num})"],
-            cwd=repo_root,
-            timeout=10
-        )
-        
-        print_fn("RED completo.\n")
+        commit_red()
         return True
     
     # Exhausted attempts
@@ -1602,6 +1949,8 @@ def build_red_prompt(spec: dict[str, Any], task: dict[str, Any]) -> str:
     lines.append(f"{rule_num}. Los tests deben fallar PORQUE FALTA el código de producción de esta tarea (import o assert sobre ese código), nunca por usar mal la API de una librería, del framework de tests o por errores del propio test.")
     rule_num += 1
     lines.append(f"{rule_num}. Antes de escribir asserts sobre una librería, verificá su API real en la versión instalada (tipos .d.ts en node_modules, o el código fuente) — no asumas la forma de los objetos.")
+    rule_num += 1
+    lines.append(f"{rule_num}. Si la tarea cambia la firma de una función existente, actualizar todos los tests existentes que la llaman; no usar casts sobre el argumento completo (ej: fn({{ a, b }} as never)) para evitar errores de tipo")
     rule_num += 1
     lines.append(f"{rule_num}. Si un test de la lista ya existe en el archivo, modificalo para que cumpla lo indicado (no dupliques)")
     rule_num += 1

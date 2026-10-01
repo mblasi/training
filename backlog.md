@@ -8,7 +8,7 @@
 
 ## 👀 En revisión
 
-- [ ] [#33](https://github.com/mblasi/training/issues/33) Harness: RED debe rechazar tests que no pasan lint/typecheck por sí mismos (y mocks tautológicos) · fix · @mblasi
+- [ ] [#35](https://github.com/mblasi/training/issues/35) Harness: RED rechaza tests legítimos cuando cambia una firma de producción (TS2353) y el revert descarta ediciones correctas · fix · @mblasi
 
 ## 📋 Pendiente
 
@@ -20,6 +20,7 @@
 
 ## ✅ Hecho
 
+- [x] [#33](https://github.com/mblasi/training/issues/33) Harness: RED debe rechazar tests que no pasan lint/typecheck por sí mismos (y mocks tautológicos) · fix · @mblasi
 - [x] [#31](https://github.com/mblasi/training/issues/31) Harness: merge deja status:review en issues cerrados · fix · @mblasi
 - [x] [#10](https://github.com/mblasi/training/issues/10) Postgres + pgvector local (Docker) + Drizzle + migraciones iniciales · feat · @mblasi
 - [x] [#28](https://github.com/mblasi/training/issues/28) Harness: volver a RED desde GREEN cuando los tests de RED están mal + RED debe fallar por ausencia de código · fix · @mblasi
