@@ -88,16 +88,13 @@ def extract_ts_error_type_name(error_code: str, error_message: str) -> str | Non
     Returns:
         The type name if found, None otherwise
     """
-    if error_code == "TS2353":
-        # Pattern: "in type X"
-        match = re.search(r"\bin type '([^']+)'", error_message)
-        if match:
-            return match.group(1)
+    patterns = {
+        "TS2353": r"\bin type '([^']+)'",
+        "TS2345": r"\bparameter of type '([^']+)'",
+    }
     
-    elif error_code == "TS2345":
-        # Pattern: "parameter of type X"
-        match = re.search(r"\bparameter of type '([^']+)'", error_message)
-        if match:
+    if pattern := patterns.get(error_code):
+        if match := re.search(pattern, error_message):
             return match.group(1)
     
     return None

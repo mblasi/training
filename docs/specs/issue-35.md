@@ -49,7 +49,7 @@ Funciones puras que extraen el tipo nombrado de un mensaje de error TS y buscan 
 **Progreso:**
 - [x] RED: tests escritos y fallan
 - [x] GREEN: tests pasan
-- [ ] REFACTOR: código limpio
+- [x] REFACTOR: código limpio
 
 ### T2: test_imports_impl_file para códigos TS sin tipo nombrado
 
