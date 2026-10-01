@@ -106,7 +106,7 @@ Cambiar run_red_phase: ante falla de check_test_files_static no revertir entre i
 - `scripts/tdd_runner.py`
 
 **Progreso:**
-- [ ] RED: tests escritos y fallan
+- [x] RED: tests escritos y fallan
 - [ ] GREEN: tests pasan
 - [ ] REFACTOR: código limpio
 

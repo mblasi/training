@@ -2,6 +2,7 @@
 """
 Tests for issue #35: accept TS2353/TS2345 errors only when type is declared in impl_files.
 """
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -631,6 +632,572 @@ import { buildApp } from '../src/app.js';
                 
                 # Should return None (accepted)
                 self.assertIsNone(result, f"{code} should still be accepted with impl_files")
+
+
+class TestNoRevertBetweenStaticAttempts(unittest.TestCase):
+    """Test that static check failures don't revert between attempts (T4)."""
+    
+    def setUp(self) -> None:
+        """Create temp git repository for testing."""
+        self.temp_dir = tempfile.mkdtemp(prefix="test_no_revert_")
+        self.repo_root = Path(self.temp_dir)
+        
+        # Initialize git repo
+        subprocess.run(["git", "init"], cwd=self.repo_root, check=True, capture_output=True)
+        subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=self.repo_root, check=True, capture_output=True)
+        subprocess.run(["git", "config", "user.name", "Test User"], cwd=self.repo_root, check=True, capture_output=True)
+        
+        # Create initial commit
+        readme = self.repo_root / "README.md"
+        readme.write_text("# Test repo")
+        subprocess.run(["git", "add", "."], cwd=self.repo_root, check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "Initial commit"], cwd=self.repo_root, check=True, capture_output=True)
+        
+        # Create directories
+        (self.repo_root / "tests").mkdir()
+        (self.repo_root / "src").mkdir()
+        (self.repo_root / "docs" / "specs").mkdir(parents=True)
+        (self.repo_root / ".backlog" / "runs" / "issue-35").mkdir(parents=True)
+    
+    def tearDown(self) -> None:
+        """Clean up temp directory."""
+        import shutil
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+    
+    def _run(self, cmd: list[str], cwd: str | None = None, timeout: int = 10) -> subprocess.CompletedProcess:
+        """Helper to run command."""
+        if cwd is None:
+            cwd = self.repo_root
+        return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout, check=False)
+    
+    def test_no_revert_between_static_attempts(self) -> None:
+        """Tras falla estática en intento 1, los archivos cambiados siguen presentes en el FS al invocar el coder en intento 2."""
+        # Create spec
+        spec = {
+            "summary": "Test static check no revert",
+            "decisions": [],
+            "tasks": [
+                {
+                    "id": "T1",
+                    "title": "Test task",
+                    "description": "Test description",
+                    "tests": [{"file": "tests/test_foo.py", "name": "test_foo", "asserts": "assert False"}],
+                    "impl_files": ["src/foo.py"]
+                }
+            ]
+        }
+        
+        task = spec["tasks"][0]
+        
+        # Create spec file
+        spec_path = self.repo_root / "docs" / "specs" / "issue-35.md"
+        spec_content = """---
+issue: 35
+status: approved
+test_command: python3 -m unittest discover -s tests -v
+---
+
+# Test spec
+
+## Decisiones de diseño
+
+| ID | Topic | Opciones | Elegida | Rationale |
+|----|-------|----------|---------|-----------|
+
+## Tareas
+
+### T1: Test task
+
+Test description
+
+**Tests:**
+- `tests/test_foo.py::test_foo`: assert False
+
+**Archivos de implementación:**
+- `src/foo.py`
+
+**Progreso:**
+- [ ] RED: tests escritos y fallan
+- [ ] GREEN: tests pasan
+- [ ] REFACTOR: código limpio
+"""
+        spec_path.write_text(spec_content)
+        subprocess.run(["git", "add", str(spec_path)], cwd=self.repo_root, check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "docs: spec"], cwd=self.repo_root, check=True, capture_output=True)
+        
+        # Track coder calls and file state at invocation
+        coder_calls = []
+        
+        def fake_coder(prompt: str, log_path: str) -> tuple[int, str]:
+            call_num = len(coder_calls)
+            
+            # Record state of test file at invocation
+            test_file_path = self.repo_root / "tests" / "test_foo.py"
+            file_exists = test_file_path.exists()
+            file_content = test_file_path.read_text() if file_exists else None
+            
+            coder_calls.append({
+                "prompt": prompt,
+                "log_path": log_path,
+                "file_exists_at_invocation": file_exists,
+                "file_content_at_invocation": file_content
+            })
+            
+            if call_num == 0:
+                # First call: write test with syntax error (triggers static check failure)
+                test_file_path.write_text("def test_foo(\n")  # Missing closing paren
+                return 0, "Tests written (invalid)"
+            else:
+                # Second call: write valid test that fails
+                test_file_path.write_text(
+                    "import unittest\n"
+                    "class TestFoo(unittest.TestCase):\n"
+                    "    def test_foo(self):\n"
+                    "        assert False\n"
+                )
+                return 0, "Tests written (valid)"
+        
+        logs_dir = self.repo_root / ".backlog" / "runs" / "issue-35"
+        
+        # Run RED phase
+        result = tdd_runner.run_red_phase(
+            repo_root=str(self.repo_root),
+            issue_num=35,
+            task=task,
+            spec=spec,
+            spec_path=spec_path,
+            test_cmd=["python3", "-m", "unittest", "discover", "-s", "tests", "-v"],
+            logs_dir=logs_dir,
+            coder=fake_coder,
+            run_cmd=self._run,
+            input_fn=lambda p: "",
+            print_fn=lambda m: None
+        )
+        
+        # Should succeed after retry
+        self.assertTrue(result)
+        
+        # Should have made 2 coder calls
+        self.assertEqual(len(coder_calls), 2)
+        
+        # CRITICAL: Second call should see the file from first call (not reverted)
+        second_call = coder_calls[1]
+        self.assertTrue(second_call["file_exists_at_invocation"], 
+                       "Test file should still exist when coder is invoked for second attempt")
+        self.assertIsNotNone(second_call["file_content_at_invocation"],
+                           "Test file should have content from first attempt at second invocation")
+        
+        # Content should be the invalid one from first attempt (proving no revert)
+        self.assertEqual(second_call["file_content_at_invocation"], "def test_foo(\n",
+                        "Test file should contain first attempt's invalid content at second invocation")
+    
+    def test_revert_all_on_exhausted_attempts(self) -> None:
+        """Al agotar max_attempts con falla estática persistente, git status queda limpio y run_red_phase retorna False."""
+        # Create spec
+        spec = {
+            "summary": "Test revert on exhausted",
+            "decisions": [],
+            "tasks": [
+                {
+                    "id": "T1",
+                    "title": "Test task",
+                    "description": "Test description",
+                    "tests": [{"file": "tests/test_bar.py", "name": "test_bar", "asserts": "assert False"}],
+                    "impl_files": ["src/bar.py"]
+                }
+            ]
+        }
+        
+        task = spec["tasks"][0]
+        
+        # Create spec file
+        spec_path = self.repo_root / "docs" / "specs" / "issue-35.md"
+        spec_content = """---
+issue: 35
+status: approved
+test_command: python3 -m unittest discover -s tests -v
+---
+
+# Test spec
+
+## Tareas
+
+### T1: Test task
+
+**Tests:**
+- `tests/test_bar.py::test_bar`: assert False
+
+**Archivos de implementación:**
+- `src/bar.py`
+
+**Progreso:**
+- [ ] RED: tests escritos y fallan
+"""
+        spec_path.write_text(spec_content)
+        subprocess.run(["git", "add", str(spec_path)], cwd=self.repo_root, check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "docs: spec"], cwd=self.repo_root, check=True, capture_output=True)
+        
+        # Fake coder that always writes invalid syntax
+        def fake_coder_always_fails(prompt: str, log_path: str) -> tuple[int, str]:
+            test_file_path = self.repo_root / "tests" / "test_bar.py"
+            test_file_path.write_text("def test_bar(\n")  # Always invalid
+            return 0, "Tests written (always invalid)"
+        
+        # Mock input_fn to return 'abortar' when asked
+        def mock_input(prompt: str) -> str:
+            if "Continuar o abortar" in prompt:
+                return "abortar"
+            return ""
+        
+        logs_dir = self.repo_root / ".backlog" / "runs" / "issue-35"
+        
+        # Run RED phase
+        result = tdd_runner.run_red_phase(
+            repo_root=str(self.repo_root),
+            issue_num=35,
+            task=task,
+            spec=spec,
+            spec_path=spec_path,
+            test_cmd=["python3", "-m", "unittest", "discover", "-s", "tests", "-v"],
+            logs_dir=logs_dir,
+            coder=fake_coder_always_fails,
+            run_cmd=self._run,
+            input_fn=mock_input,
+            print_fn=lambda m: None
+        )
+        
+        # Should return False (aborted)
+        self.assertFalse(result)
+        
+        # Git status should be clean (all files reverted)
+        status_result = self._run(["git", "status", "--porcelain"])
+        self.assertEqual(status_result.stdout.strip(), "", 
+                        "Git working tree should be clean after aborting exhausted attempts")
+    
+    def test_revert_all_on_user_abort(self) -> None:
+        """Cuando el usuario elige 'abortar' tras agotar intentos, git status queda limpio."""
+        # This test is effectively the same as test_revert_all_on_exhausted_attempts
+        # because the user is already choosing 'abortar' in that test
+        # But we make it explicit for clarity
+        
+        # Create spec
+        spec = {
+            "summary": "Test user abort",
+            "decisions": [],
+            "tasks": [
+                {
+                    "id": "T1",
+                    "title": "Test task abort",
+                    "description": "Test description",
+                    "tests": [{"file": "tests/test_abort.py", "name": "test_abort", "asserts": "assert False"}],
+                    "impl_files": ["src/abort.py"]
+                }
+            ]
+        }
+        
+        task = spec["tasks"][0]
+        
+        # Create spec file
+        spec_path = self.repo_root / "docs" / "specs" / "issue-35.md"
+        spec_content = """---
+issue: 35
+status: approved
+test_command: python3 -m unittest discover -s tests -v
+---
+
+# Test spec
+
+## Tareas
+
+### T1: Test task abort
+
+**Tests:**
+- `tests/test_abort.py::test_abort`: assert False
+
+**Archivos de implementación:**
+- `src/abort.py`
+
+**Progreso:**
+- [ ] RED: tests escritos y fallan
+"""
+        spec_path.write_text(spec_content)
+        subprocess.run(["git", "add", str(spec_path)], cwd=self.repo_root, check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "docs: spec"], cwd=self.repo_root, check=True, capture_output=True)
+        
+        # Fake coder that always writes invalid syntax
+        def fake_coder_invalid(prompt: str, log_path: str) -> tuple[int, str]:
+            test_file_path = self.repo_root / "tests" / "test_abort.py"
+            test_file_path.write_text("def test_abort(\n")  # Always invalid
+            return 0, "Tests written (invalid)"
+        
+        # Mock input_fn that explicitly chooses 'abortar'
+        def mock_input_abortar(prompt: str) -> str:
+            if "Continuar o abortar" in prompt:
+                return "abortar"
+            return ""
+        
+        logs_dir = self.repo_root / ".backlog" / "runs" / "issue-35"
+        
+        # Run RED phase
+        result = tdd_runner.run_red_phase(
+            repo_root=str(self.repo_root),
+            issue_num=35,
+            task=task,
+            spec=spec,
+            spec_path=spec_path,
+            test_cmd=["python3", "-m", "unittest", "discover", "-s", "tests", "-v"],
+            logs_dir=logs_dir,
+            coder=fake_coder_invalid,
+            run_cmd=self._run,
+            input_fn=mock_input_abortar,
+            print_fn=lambda m: None
+        )
+        
+        # Should return False
+        self.assertFalse(result)
+        
+        # Git status should be clean
+        status_result = self._run(["git", "status", "--porcelain"])
+        self.assertEqual(status_result.stdout.strip(), "",
+                        "Git working tree should be clean when user chooses 'abortar'")
+    
+    def test_continuar_warns_about_lint_typecheck(self) -> None:
+        """Cuando el usuario elige 'continuar' tras agotar intentos con falla estática, el output contiene advertencia explícita."""
+        # Create TypeScript workspace
+        workspace = self.repo_root / "app"
+        workspace.mkdir()
+        test_dir = workspace / "test"
+        test_dir.mkdir()
+        
+        # Create package.json
+        (workspace / "package.json").write_text('{"name": "app"}')
+        
+        # Create tsconfig.json with strict mode to catch implicit any
+        (workspace / "tsconfig.json").write_text('''{
+  "compilerOptions": {
+    "strict": true,
+    "noImplicitAny": true
+  }
+}''')
+        
+        # Create spec
+        spec = {
+            "summary": "Test continuar warning",
+            "decisions": [],
+            "tasks": [
+                {
+                    "id": "T1",
+                    "title": "Test task continuar",
+                    "description": "Test description",
+                    "tests": [{"file": "app/test/continuar.test.ts", "name": "test_continuar", "asserts": "expect(false).toBe(true)"}],
+                    "impl_files": ["app/src/continuar.ts"]
+                }
+            ]
+        }
+        
+        task = spec["tasks"][0]
+        
+        # Create spec file
+        spec_path = self.repo_root / "docs" / "specs" / "issue-35.md"
+        spec_content = """---
+issue: 35
+status: approved
+test_command: sh -c "exit 1"
+---
+
+# Test spec
+
+## Tareas
+
+### T1: Test task continuar
+
+**Tests:**
+- `app/test/continuar.test.ts::test_continuar`: expect(false).toBe(true)
+
+**Archivos de implementación:**
+- `app/src/continuar.ts`
+
+**Progreso:**
+- [ ] RED: tests escritos y fallan
+"""
+        spec_path.write_text(spec_content)
+        subprocess.run(["git", "add", str(spec_path)], cwd=self.repo_root, check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "docs: spec"], cwd=self.repo_root, check=True, capture_output=True)
+        
+        # Fake coder that writes code with implicit any (TS7006 error)
+        def fake_coder_implicit_any(prompt: str, log_path: str) -> tuple[int, str]:
+            test_file_path = test_dir / "continuar.test.ts"
+            # Write code with implicit any - tsc will complain but test execution would work
+            test_file_path.write_text(
+                "import { describe, test, expect } from 'vitest';\n"
+                "\n"
+                "// Function with implicit any parameter (TS7006)\n"
+                "function helper(x) {\n"  # x has implicit any
+                "  return x;\n"
+                "}\n"
+                "\n"
+                "test('continuar', () => {\n"
+                "  expect(false).toBe(true);  // Fails as expected\n"
+                "});\n"
+            )
+            return 0, "Tests written (with implicit any)"
+        
+        # Mock input_fn that chooses 'continuar'
+        def mock_input_continuar(prompt: str) -> str:
+            if "Continuar o abortar" in prompt:
+                return "continuar"
+            return ""
+        
+        # Capture print output
+        print_output = []
+        def mock_print(msg: str) -> None:
+            print_output.append(msg)
+        
+        logs_dir = self.repo_root / ".backlog" / "runs" / "issue-35"
+        
+        # Run RED phase
+        result = tdd_runner.run_red_phase(
+            repo_root=str(self.repo_root),
+            issue_num=35,
+            task=task,
+            spec=spec,
+            spec_path=spec_path,
+            test_cmd=["sh", "-c", "exit 1"],  # Fake test command that fails (as expected in RED)
+            logs_dir=logs_dir,
+            coder=fake_coder_implicit_any,
+            run_cmd=self._run,
+            input_fn=mock_input_continuar,
+            print_fn=mock_print
+        )
+        
+        # Should return True (user chose to continue)
+        self.assertTrue(result)
+        
+        # Check for warning in print output
+        all_output = "\n".join(print_output)
+        # Warning should mention lint or typecheck failure
+        self.assertTrue(
+            ("lint" in all_output.lower() and "typecheck" in all_output.lower()) or
+            "static" in all_output.lower() or
+            "advertencia" in all_output.lower(),
+            f"Output should warn about static check failure when continuing. Output: {all_output}"
+        )
+        
+        # Commit should exist (code was committed despite static check failure)
+        log_result = self._run(["git", "log", "--oneline", "--grep", "test: Test task continuar (#35)", "--fixed-strings"])
+        self.assertIn("test: Test task continuar (#35)", log_result.stdout,
+                     "Commit should exist when user chooses 'continuar'")
+    
+    def test_non_static_revert_unchanged(self) -> None:
+        """Falla por archivos de producción sigue revirtiendo los archivos de producción (comportamiento previo intacto)."""
+        # Create spec
+        spec = {
+            "summary": "Test production file revert",
+            "decisions": [],
+            "tasks": [
+                {
+                    "id": "T1",
+                    "title": "Test task prod",
+                    "description": "Test description",
+                    "tests": [{"file": "tests/test_prod.py", "name": "test_prod", "asserts": "assert False"}],
+                    "impl_files": ["src/prod.py"]
+                }
+            ]
+        }
+        
+        task = spec["tasks"][0]
+        
+        # Create spec file
+        spec_path = self.repo_root / "docs" / "specs" / "issue-35.md"
+        spec_content = """---
+issue: 35
+status: approved
+test_command: python3 -m unittest discover -s tests -v
+---
+
+# Test spec
+
+## Tareas
+
+### T1: Test task prod
+
+**Tests:**
+- `tests/test_prod.py::test_prod`: assert False
+
+**Archivos de implementación:**
+- `src/prod.py`
+
+**Progreso:**
+- [ ] RED: tests escritos y fallan
+"""
+        spec_path.write_text(spec_content)
+        subprocess.run(["git", "add", str(spec_path)], cwd=self.repo_root, check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "docs: spec"], cwd=self.repo_root, check=True, capture_output=True)
+        
+        # Fake coder that writes a production file (not allowed in RED)
+        coder_calls = []
+        
+        def fake_coder_writes_prod(prompt: str, log_path: str) -> tuple[int, str]:
+            call_num = len(coder_calls)
+            
+            # Record state of production file at invocation
+            prod_file_path = self.repo_root / "src" / "prod.py"
+            file_exists = prod_file_path.exists()
+            
+            coder_calls.append({
+                "prompt": prompt,
+                "file_exists_at_invocation": file_exists
+            })
+            
+            if call_num == 0:
+                # First call: write both test and production file (violation)
+                test_file_path = self.repo_root / "tests" / "test_prod.py"
+                test_file_path.write_text(
+                    "import unittest\n"
+                    "class TestProd(unittest.TestCase):\n"
+                    "    def test_prod(self):\n"
+                    "        assert False\n"
+                )
+                prod_file_path.write_text("# Production code (not allowed in RED)")
+                return 0, "Tests and prod written"
+            else:
+                # Second call: write only test file (correct)
+                test_file_path = self.repo_root / "tests" / "test_prod.py"
+                test_file_path.write_text(
+                    "import unittest\n"
+                    "class TestProd(unittest.TestCase):\n"
+                    "    def test_prod(self):\n"
+                    "        assert False\n"
+                )
+                return 0, "Only tests written"
+        
+        logs_dir = self.repo_root / ".backlog" / "runs" / "issue-35"
+        
+        # Run RED phase
+        result = tdd_runner.run_red_phase(
+            repo_root=str(self.repo_root),
+            issue_num=35,
+            task=task,
+            spec=spec,
+            spec_path=spec_path,
+            test_cmd=["python3", "-m", "unittest", "discover", "-s", "tests", "-v"],
+            logs_dir=logs_dir,
+            coder=fake_coder_writes_prod,
+            run_cmd=self._run,
+            input_fn=lambda p: "",
+            print_fn=lambda m: None
+        )
+        
+        # Should succeed after retry
+        self.assertTrue(result)
+        
+        # Should have made 2 coder calls
+        self.assertEqual(len(coder_calls), 2)
+        
+        # Second call should NOT see the production file (it was reverted)
+        second_call = coder_calls[1]
+        self.assertFalse(second_call["file_exists_at_invocation"],
+                        "Production file should have been reverted before second coder invocation")
 
 
 if __name__ == "__main__":
