@@ -108,7 +108,7 @@ Cambiar run_red_phase: ante falla de check_test_files_static no revertir entre i
 **Progreso:**
 - [x] RED: tests escritos y fallan
 - [x] GREEN: tests pasan
-- [ ] REFACTOR: código limpio
+- [x] REFACTOR: código limpio
 
 ### T5: get_new_lines y detect_full_arg_cast
 
