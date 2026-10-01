@@ -224,3 +224,164 @@ describe('upsertUser', () => {
     expect(calls2[1].set.role).toBe('user');
   });
 });
+
+describe('auth plugin', () => {
+  test('test_auth_plugin_returns_401_without_token', async () => {
+    const fakeDb = createFakeDb();
+    const fakePool = { query: vi.fn() } as never;
+    const mockAuth = {
+      verifyIdToken: vi.fn(),
+    };
+
+    const { buildApp } = await import('../src/app.js');
+    const app = buildApp({
+      db: { pool: fakePool, db: fakeDb as never },
+      auth: mockAuth,
+      adminEmails: [],
+    });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/me',
+    });
+
+    expect(response.statusCode).toBe(401);
+    expect(mockAuth.verifyIdToken).not.toHaveBeenCalled();
+  });
+
+  test('test_auth_plugin_returns_401_with_invalid_token', async () => {
+    const fakeDb = createFakeDb();
+    const fakePool = { query: vi.fn() } as never;
+    const mockAuth = {
+      verifyIdToken: vi.fn().mockRejectedValue(new Error('invalid token')),
+    };
+
+    const { buildApp } = await import('../src/app.js');
+    const app = buildApp({
+      db: { pool: fakePool, db: fakeDb as never },
+      auth: mockAuth,
+      adminEmails: [],
+    });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/me',
+      headers: {
+        authorization: 'Bearer invalid-token',
+      },
+    });
+
+    expect(response.statusCode).toBe(401);
+    expect(mockAuth.verifyIdToken).toHaveBeenCalledWith('invalid-token');
+    expect(fakeDb.getCalls()).toHaveLength(0);
+  });
+
+  test('test_auth_plugin_returns_200_and_user_with_valid_token', async () => {
+    const fakeDb = createFakeDb();
+    const fakePool = { query: vi.fn() } as never;
+    const mockAuth = {
+      verifyIdToken: vi.fn().mockResolvedValue({
+        uid: 'u123',
+        email: 'user@test.com',
+        email_verified: true,
+      }),
+    };
+
+    const { buildApp } = await import('../src/app.js');
+    const app = buildApp({
+      db: { pool: fakePool, db: fakeDb as never },
+      auth: mockAuth,
+      adminEmails: [],
+    });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/me',
+      headers: {
+        authorization: 'Bearer valid-token',
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(mockAuth.verifyIdToken).toHaveBeenCalledWith('valid-token');
+    
+    const calls = fakeDb.getCalls();
+    expect(calls).toHaveLength(1);
+    expect(calls[0].row.firebase_uid).toBe('u123');
+    expect(calls[0].row.email).toBe('user@test.com');
+    expect(calls[0].row.role).toBe('user');
+
+    const body = JSON.parse(response.body);
+    expect(body).toEqual({
+      id: 'generated-uuid',
+      uid: 'u123',
+      email: 'user@test.com',
+      role: 'user',
+    });
+  });
+
+  test('test_requireAdmin_returns_403_for_user_role', async () => {
+    const fakeDb = createFakeDb();
+    const fakePool = { query: vi.fn() } as never;
+    const mockAuth = {
+      verifyIdToken: vi.fn().mockResolvedValue({
+        uid: 'u456',
+        email: 'user@test.com',
+        email_verified: true,
+      }),
+    };
+
+    const { buildApp } = await import('../src/app.js');
+    const app = buildApp({
+      db: { pool: fakePool, db: fakeDb as never },
+      auth: mockAuth,
+      adminEmails: [],
+    });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/admin/ping',
+      headers: {
+        authorization: 'Bearer valid-token',
+      },
+    });
+
+    expect(response.statusCode).toBe(403);
+  });
+
+  test('test_requireAdmin_returns_200_for_admin_role', async () => {
+    const fakeDb = createFakeDb();
+    const fakePool = { query: vi.fn() } as never;
+    const mockAuth = {
+      verifyIdToken: vi.fn().mockResolvedValue({
+        uid: 'u789',
+        email: 'admin@test.com',
+        email_verified: true,
+      }),
+    };
+
+    const { buildApp } = await import('../src/app.js');
+    const app = buildApp({
+      db: { pool: fakePool, db: fakeDb as never },
+      auth: mockAuth,
+      adminEmails: ['admin@test.com'],
+    });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/admin/ping',
+      headers: {
+        authorization: 'Bearer admin-token',
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    
+    const calls = fakeDb.getCalls();
+    expect(calls).toHaveLength(1);
+    expect(calls[0].row.role).toBe('admin');
+
+    const body = JSON.parse(response.body);
+    expect(body).toEqual({ ok: true });
+  });
+});

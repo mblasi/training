@@ -8,8 +8,13 @@ describe('GET /health', () => {
       query: vi.fn().mockResolvedValue({ rows: [{ '?column?': 1 }] }),
     };
     const mockDb = { pool: mockPool };
+    const mockAuth = { verifyIdToken: vi.fn() };
     
-    const app = buildApp({ db: mockDb as never });
+    const app = buildApp({
+      db: mockDb as never,
+      auth: mockAuth,
+      adminEmails: [],
+    });
     const response = await app.inject({
       method: 'GET',
       url: '/health',
@@ -28,8 +33,13 @@ describe('GET /health', () => {
       query: vi.fn().mockRejectedValue(new Error('Connection refused')),
     };
     const mockDb = { pool: mockPool };
+    const mockAuth = { verifyIdToken: vi.fn() };
     
-    const app = buildApp({ db: mockDb as never });
+    const app = buildApp({
+      db: mockDb as never,
+      auth: mockAuth,
+      adminEmails: [],
+    });
     const response = await app.inject({
       method: 'GET',
       url: '/health',
@@ -47,9 +57,14 @@ describe('GET /health', () => {
       query: vi.fn().mockImplementation(() => new Promise(() => {})), // never resolves
     };
     const mockDb = { pool: mockPool };
+    const mockAuth = { verifyIdToken: vi.fn() };
     
     process.env.DB_HEALTH_TIMEOUT_MS = '1';
-    const app = buildApp({ db: mockDb as never });
+    const app = buildApp({
+      db: mockDb as never,
+      auth: mockAuth,
+      adminEmails: [],
+    });
     const response = await app.inject({
       method: 'GET',
       url: '/health',
@@ -68,8 +83,13 @@ describe('GET /health', () => {
       query: vi.fn().mockResolvedValue({ rows: [{ '?column?': 1 }] }),
     };
     const mockDb = { pool: mockPool };
+    const mockAuth = { verifyIdToken: vi.fn() };
     
-    const app = buildApp({ db: mockDb as never });
+    const app = buildApp({
+      db: mockDb as never,
+      auth: mockAuth,
+      adminEmails: [],
+    });
     const response = await app.inject({
       method: 'GET',
       url: '/health',

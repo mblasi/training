@@ -122,7 +122,13 @@ describe('Database integration', () => {
   test('/health returns 200 with db ok', async () => {
     if (!db) throw new Error('DB not initialized');
     
-    const app = buildApp({ db });
+    const { vi } = await import('vitest');
+    const mockAuth = { verifyIdToken: vi.fn() };
+    const app = buildApp({
+      db,
+      auth: mockAuth,
+      adminEmails: [],
+    });
     
     const response = await app.inject({
       method: 'GET',
