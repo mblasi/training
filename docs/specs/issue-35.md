@@ -169,7 +169,7 @@ Tests de integración de run_red_phase con repo git real (scaffolding commiteado
 - `AGENTS.md`
 
 **Progreso:**
-- [x] RED: tests escritos y fallan
+- [ ] RED: tests escritos y fallan
 - [ ] GREEN: tests pasan
 - [ ] REFACTOR: código limpio
 
