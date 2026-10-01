@@ -49,6 +49,133 @@ class TestExtractTsErrorTypeName(unittest.TestCase):
         self.assertIsNone(result)
 
 
+class TestImportsImplFile(unittest.TestCase):
+    """Test test_imports_impl_file function."""
+    
+    def setUp(self) -> None:
+        """Create temp directory for test files."""
+        self.temp_dir = tempfile.mkdtemp(prefix="test_imports_impl_")
+        self.repo_root = Path(self.temp_dir)
+    
+    def tearDown(self) -> None:
+        """Clean up temp directory."""
+        import shutil
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+    
+    def test_imports_impl_file_resolves_js_extension_to_ts(self) -> None:
+        """Test resolves .js extension to .ts file for impl_file match."""
+        # Create impl file
+        impl_file = self.repo_root / "apps" / "api" / "src" / "app.ts"
+        impl_file.parent.mkdir(parents=True)
+        impl_file.write_text("export function buildApp() {}")
+        
+        # Create test file with .js import
+        test_file = self.repo_root / "apps" / "api" / "test" / "auth.test.ts"
+        test_file.parent.mkdir(parents=True)
+        test_file.write_text("""
+import { buildApp } from '../src/app.js';
+
+test('auth', () => {
+    buildApp();
+});
+""")
+        
+        result = tdd_runner.test_imports_impl_file(
+            "apps/api/test/auth.test.ts",
+            ["apps/api/src/app.ts"],
+            str(self.repo_root)
+        )
+        
+        self.assertTrue(result)
+    
+    def test_imports_impl_file_resolves_no_extension(self) -> None:
+        """Test resolves import without extension to impl_file."""
+        # Create impl file
+        impl_file = self.repo_root / "src" / "bar.ts"
+        impl_file.parent.mkdir(parents=True)
+        impl_file.write_text("export function bar() {}")
+        
+        # Create test file with no extension import
+        test_file = self.repo_root / "test" / "foo.test.ts"
+        test_file.parent.mkdir(parents=True)
+        test_file.write_text("""
+import { bar } from '../src/bar';
+
+test('foo', () => {
+    bar();
+});
+""")
+        
+        result = tdd_runner.test_imports_impl_file(
+            "test/foo.test.ts",
+            ["src/bar.ts"],
+            str(self.repo_root)
+        )
+        
+        self.assertTrue(result)
+    
+    def test_imports_impl_file_false_when_no_matching_import(self) -> None:
+        """Test returns False when test does not import impl_file."""
+        # Create impl file
+        impl_file = self.repo_root / "src" / "auth.ts"
+        impl_file.parent.mkdir(parents=True)
+        impl_file.write_text("export function auth() {}")
+        
+        # Create test file importing something else
+        test_file = self.repo_root / "test" / "x.test.ts"
+        test_file.parent.mkdir(parents=True)
+        test_file.write_text("""
+import { something } from '../src/other';
+
+test('x', () => {
+    something();
+});
+""")
+        
+        result = tdd_runner.test_imports_impl_file(
+            "test/x.test.ts",
+            ["src/auth.ts"],
+            str(self.repo_root)
+        )
+        
+        self.assertFalse(result)
+    
+    def test_imports_impl_file_handles_dynamic_import(self) -> None:
+        """Test detects dynamic import() in addition to static imports."""
+        # Create impl file
+        impl_file = self.repo_root / "src" / "dynamic.ts"
+        impl_file.parent.mkdir(parents=True)
+        impl_file.write_text("export function dynamic() {}")
+        
+        # Create test file with dynamic import
+        test_file = self.repo_root / "test" / "dyn.test.ts"
+        test_file.parent.mkdir(parents=True)
+        test_file.write_text("""
+test('dynamic import', async () => {
+    const mod = await import('../src/dynamic.js');
+    mod.dynamic();
+});
+""")
+        
+        result = tdd_runner.test_imports_impl_file(
+            "test/dyn.test.ts",
+            ["src/dynamic.ts"],
+            str(self.repo_root)
+        )
+        
+        self.assertTrue(result)
+    
+    def test_imports_impl_file_false_when_file_missing(self) -> None:
+        """Test returns False when test file does not exist."""
+        result = tdd_runner.test_imports_impl_file(
+            "test/nonexistent.test.ts",
+            ["src/auth.ts"],
+            str(self.repo_root)
+        )
+        
+        self.assertFalse(result)
+
+
 class TestTypeDeclaredInImplFiles(unittest.TestCase):
     """Test type_declared_in_impl_files function."""
     
