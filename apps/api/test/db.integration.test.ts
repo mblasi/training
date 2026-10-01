@@ -122,8 +122,7 @@ describe('Database integration', () => {
   test('/health returns 200 with db ok', async () => {
     if (!db) throw new Error('DB not initialized');
     
-    const mockAuth = { verifyIdToken: async () => ({ uid: 'test', email: 'test@example.com' }) };
-    const app = buildApp({ db, auth: mockAuth, adminEmails: [] });
+    const app = buildApp({ db });
     
     const response = await app.inject({
       method: 'GET',
