@@ -87,7 +87,7 @@ Extender check_test_files_static con parámetro impl_files opcional: con None se
 - `scripts/tdd_runner.py`
 
 **Progreso:**
-- [ ] RED: tests escritos y fallan
+- [x] RED: tests escritos y fallan
 - [ ] GREEN: tests pasan
 - [ ] REFACTOR: código limpio
 
