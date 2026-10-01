@@ -2,6 +2,7 @@ import { describe, test, expect, vi } from 'vitest';
 import { verifyToken } from '../src/auth/verifyToken.js';
 import { upsertUser } from '../src/auth/upsertUser.js';
 import { users } from '../src/db/schema/users.js';
+import { buildApp } from '../src/app.js';
 
 describe('verifyToken', () => {
   test('test_verifyToken_returns_decoded_token', async () => {
@@ -222,5 +223,183 @@ describe('upsertUser', () => {
     expect(calls2).toHaveLength(2);
     expect(calls2[1].row.role).toBe('user');
     expect(calls2[1].set.role).toBe('user');
+  });
+});
+
+describe('auth plugin', () => {
+  test('test_auth_plugin_returns_401_without_token', async () => {
+    const mockAuth = {
+      verifyIdToken: vi.fn(),
+    };
+
+    const mockDb = {
+      pool: { query: vi.fn() },
+      db: {} as never,
+    };
+
+    const app = buildApp({ db: mockDb, auth: mockAuth } as never);
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/me',
+    });
+
+    expect(response.statusCode).toBe(401);
+  });
+
+  test('test_auth_plugin_returns_401_with_invalid_token', async () => {
+    const mockAuth = {
+      verifyIdToken: vi.fn().mockRejectedValue(new Error('invalid token')),
+    };
+
+    const mockDb = {
+      pool: { query: vi.fn() },
+      db: {} as never,
+    };
+
+    const app = buildApp({ db: mockDb, auth: mockAuth } as never);
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/me',
+      headers: {
+        authorization: 'Bearer invalid-token',
+      },
+    });
+
+    expect(response.statusCode).toBe(401);
+  });
+
+  test('test_auth_plugin_returns_200_and_user_with_valid_token', async () => {
+    const mockAuth = {
+      verifyIdToken: vi.fn().mockResolvedValue({
+        uid: 'firebase-uid-1',
+        email: 'user@example.com',
+        email_verified: true,
+      }),
+    };
+
+    const mockUser = {
+      id: '123',
+      firebase_uid: 'firebase-uid-1',
+      email: 'user@example.com',
+      role: 'user' as const,
+      locale: 'en',
+      created_at: new Date(),
+    };
+
+    const mockDb = {
+      pool: { query: vi.fn() },
+      db: {
+        select: vi.fn().mockReturnValue({
+          from: vi.fn().mockReturnValue({
+            where: vi.fn().mockResolvedValue([mockUser]),
+          }),
+        }),
+      } as never,
+    };
+
+    const app = buildApp({ db: mockDb, auth: mockAuth } as never);
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/me',
+      headers: {
+        authorization: 'Bearer valid-token',
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = JSON.parse(response.body);
+    expect(body).toEqual({
+      id: '123',
+      uid: 'firebase-uid-1',
+      email: 'user@example.com',
+      role: 'user',
+    });
+  });
+
+  test('test_requireAdmin_returns_403_for_user_role', async () => {
+    const mockAuth = {
+      verifyIdToken: vi.fn().mockResolvedValue({
+        uid: 'firebase-uid-2',
+        email: 'user@example.com',
+        email_verified: true,
+      }),
+    };
+
+    const mockUser = {
+      id: '124',
+      firebase_uid: 'firebase-uid-2',
+      email: 'user@example.com',
+      role: 'user' as const,
+      locale: 'en',
+      created_at: new Date(),
+    };
+
+    const mockDb = {
+      pool: { query: vi.fn() },
+      db: {
+        select: vi.fn().mockReturnValue({
+          from: vi.fn().mockReturnValue({
+            where: vi.fn().mockResolvedValue([mockUser]),
+          }),
+        }),
+      } as never,
+    };
+
+    const app = buildApp({ db: mockDb, auth: mockAuth } as never);
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/admin/ping',
+      headers: {
+        authorization: 'Bearer valid-token',
+      },
+    });
+
+    expect(response.statusCode).toBe(403);
+  });
+
+  test('test_requireAdmin_returns_200_for_admin_role', async () => {
+    const mockAuth = {
+      verifyIdToken: vi.fn().mockResolvedValue({
+        uid: 'firebase-uid-3',
+        email: 'admin@example.com',
+        email_verified: true,
+      }),
+    };
+
+    const mockUser = {
+      id: '125',
+      firebase_uid: 'firebase-uid-3',
+      email: 'admin@example.com',
+      role: 'admin' as const,
+      locale: 'en',
+      created_at: new Date(),
+    };
+
+    const mockDb = {
+      pool: { query: vi.fn() },
+      db: {
+        select: vi.fn().mockReturnValue({
+          from: vi.fn().mockReturnValue({
+            where: vi.fn().mockResolvedValue([mockUser]),
+          }),
+        }),
+      } as never,
+    };
+
+    const app = buildApp({ db: mockDb, auth: mockAuth } as never);
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/admin/ping',
+      headers: {
+        authorization: 'Bearer valid-token',
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
   });
 });
