@@ -350,12 +350,48 @@ ACCEPTABLE_TS_ERRORS = {
 }
 
 
-def check_test_files_static(repo_root: str, test_files: list[str], run_cmd: Callable) -> str | None:
+def is_signature_error_acceptable(error_code: str, error_line: str, test_file: str, impl_files: list[str], repo_root: str) -> bool:
+    """
+    Check if a TypeScript signature error should be accepted.
+    
+    Extended acceptance for signature-related errors (D1):
+    - TS2353, TS2345: accepted if the named type is declared in any impl_file
+    - TS2554, TS2339, TS2551, TS2741: accepted if the test file imports any impl_file
+    
+    Args:
+        error_code: The TypeScript error code (e.g. "TS2353")
+        error_line: The full error line from tsc output
+        test_file: Test file path (relative to repo_root)
+        impl_files: List of implementation file paths (relative to repo_root)
+        repo_root: Repository root path
+    
+    Returns:
+        True if error should be accepted, False otherwise
+    """
+    # Codes with named types: extract type and check if declared in impl_files
+    if error_code in ("TS2353", "TS2345"):
+        type_name = extract_ts_error_type_name(error_code, error_line)
+        if type_name:
+            return type_declared_in_impl_files(type_name, impl_files, repo_root)
+        return False
+    
+    # Codes without named types: check if test imports any impl_file
+    if error_code in ("TS2554", "TS2339", "TS2551", "TS2741"):
+        return test_imports_impl_file(test_file, impl_files, repo_root)
+    
+    return False
+
+
+def check_test_files_static(repo_root: str, test_files: list[str], run_cmd: Callable, impl_files: list[str] | None = None) -> str | None:
     """
     Check test files for static errors (lint, typecheck, syntax).
     
     For TS/JS test files: runs ESLint and TypeScript compiler in their workspace.
     For Python test files: runs py_compile.
+    
+    With impl_files parameter: extends acceptable TS errors to include signature errors
+    (TS2353, TS2345, TS2554, TS2339, TS2551, TS2741) when the type is declared in impl_files
+    or the test imports an impl_file.
     
     Returns None if all checks pass, or a feedback string with tool output if checks fail.
     
@@ -363,6 +399,8 @@ def check_test_files_static(repo_root: str, test_files: list[str], run_cmd: Call
         repo_root: Repository root path
         test_files: List of test file paths (relative to repo_root)
         run_cmd: Command runner function
+        impl_files: Optional list of implementation file paths (relative to repo_root)
+                   for extended error acceptance logic
     
     Returns:
         None if valid, or feedback string with exact tool output if invalid
@@ -496,9 +534,27 @@ def check_test_files_static(repo_root: str, test_files: list[str], run_cmd: Call
                         
                         if is_in_changed_test:
                             # Error in changed test file
-                            if error_code not in ACCEPTABLE_TS_ERRORS:
-                                # Not an acceptable error (missing production code)
-                                invalid_errors.append(line)
+                            if error_code in ACCEPTABLE_TS_ERRORS:
+                                # Always acceptable (missing module/export)
+                                continue
+                            
+                            # Extended acceptance logic when impl_files is provided
+                            if impl_files is not None:
+                                # Reconstruct full path relative to repo_root
+                                # error_file_normalized is relative to workspace, need to make it relative to repo_root
+                                try:
+                                    workspace_rel_to_repo = str(Path(workspace).relative_to(Path(repo_root)))
+                                    full_test_file = str(Path(workspace_rel_to_repo) / error_file_normalized)
+                                except ValueError:
+                                    # workspace not relative to repo_root, shouldn't happen
+                                    full_test_file = error_file_normalized
+                                
+                                # Check if error is signature-related and should be accepted
+                                if is_signature_error_acceptable(error_code, line, full_test_file, impl_files, repo_root):
+                                    continue
+                            
+                            # Not acceptable - add to invalid list
+                            invalid_errors.append(line)
                     
                     if invalid_errors:
                         return f"TypeScript errors in test files:\n" + "\n".join(invalid_errors)

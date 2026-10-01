@@ -88,7 +88,7 @@ Extender check_test_files_static con parámetro impl_files opcional: con None se
 
 **Progreso:**
 - [x] RED: tests escritos y fallan
-- [ ] GREEN: tests pasan
+- [x] GREEN: tests pasan
 - [ ] REFACTOR: código limpio
 
 ### T4: No revertir entre intentos estáticos; revertir al agotar/abortar; avisar al continuar
