@@ -1727,5 +1727,330 @@ class TestBuildRedPromptFirmaRule(unittest.TestCase):
         )
 
 
+class TestE2ERedNewSignature(unittest.TestCase):
+    """E2E tests for run_red_phase with new signature scenario (T7)."""
+    
+    def setUp(self) -> None:
+        """Create temp git repository with TypeScript workspace."""
+        self.temp_dir = tempfile.mkdtemp(prefix="test_e2e_red_sig_")
+        self.repo_root = Path(self.temp_dir)
+        
+        # Initialize git repo
+        subprocess.run(["git", "init"], cwd=self.repo_root, check=True, capture_output=True)
+        subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=self.repo_root, check=True, capture_output=True)
+        subprocess.run(["git", "config", "user.name", "Test User"], cwd=self.repo_root, check=True, capture_output=True)
+        
+        # Create initial commit
+        readme = self.repo_root / "README.md"
+        readme.write_text("# Test repo")
+        subprocess.run(["git", "add", "."], cwd=self.repo_root, check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "Initial commit"], cwd=self.repo_root, check=True, capture_output=True)
+        
+        # Create workspace
+        self.workspace = self.repo_root / "apps" / "api"
+        self.workspace.mkdir(parents=True)
+        
+        # Create package.json
+        (self.workspace / "package.json").write_text('{"name": "api"}')
+        
+        # Create tsconfig.json
+        (self.workspace / "tsconfig.json").write_text('{"compilerOptions": {"strict": true}}')
+        
+        # Create directories
+        (self.workspace / "src").mkdir()
+        (self.workspace / "test").mkdir()
+        (self.repo_root / "docs" / "specs").mkdir(parents=True)
+        (self.repo_root / ".backlog" / "runs" / "issue-35").mkdir(parents=True)
+    
+    def tearDown(self) -> None:
+        """Clean up temp directory."""
+        import shutil
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+    
+    def _run(self, cmd: list[str], cwd: str | None = None, timeout: int = 10) -> subprocess.CompletedProcess:
+        """Helper to run command."""
+        if cwd is None:
+            cwd = self.repo_root
+        return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout, check=False)
+    
+    def _create_mock_run_cmd_with_ts2353_accepted(self):
+        """Create a mock run_cmd that accepts TS2353 when type is in impl_file."""
+        def mock_run_cmd(cmd: list[str], cwd: str | None = None, timeout: int | None = None):
+            from types import SimpleNamespace
+            
+            # For tsc with TS2353 on BuildAppOptions: return TS2353 error
+            # The check_test_files_static should accept it because BuildAppOptions is in impl_file
+            if "tsc" in " ".join(cmd):
+                # Simulate TS2353 error that should be accepted
+                return SimpleNamespace(
+                    returncode=1,
+                    stdout="apps/api/test/existing.test.ts(6,5): error TS2353: Object literal may only specify known properties, and 'extraProp' does not exist in type 'BuildAppOptions'.",
+                    stderr=""
+                )
+            
+            # For test command, return failure (tests should fail in RED)
+            if "python3" in cmd and "-c" in cmd:
+                return SimpleNamespace(returncode=1, stdout="Tests failed as expected", stderr="")
+            
+            # For git commands, use real git
+            return self._run(cmd, cwd=cwd, timeout=timeout)
+        
+        return mock_run_cmd
+    
+    def test_e2e_red_new_signature_commits_both_files(self) -> None:
+        """repo git real con impl_file que declara 'interface BuildAppOptions' con prop nueva; coder actualiza test existente trackeado y crea test nuevo; TS2353 aceptado (tipo en impl_file); RED retorna True; git log contiene commit de test; ambos archivos de test presentes y no revertidos."""
+        # Create impl_file with interface BuildAppOptions
+        impl_file = self.workspace / "src" / "app.ts"
+        impl_file.write_text("""
+export interface BuildAppOptions {
+    port: number;
+    newProp: string;
+}
+
+export function buildApp(opts: BuildAppOptions) {
+    // Implementation
+}
+""")
+        subprocess.run(["git", "add", str(impl_file)], cwd=self.repo_root, check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "feat: add BuildAppOptions interface"], cwd=self.repo_root, check=True, capture_output=True)
+        
+        # Create existing test file (tracked)
+        existing_test = self.workspace / "test" / "existing.test.ts"
+        existing_test.write_text("""
+import { test } from 'vitest';
+import { buildApp } from '../src/app.js';
+
+test('existing', () => {
+    buildApp({ port: 3000 });
+});
+""")
+        subprocess.run(["git", "add", str(existing_test)], cwd=self.repo_root, check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "test: add existing test"], cwd=self.repo_root, check=True, capture_output=True)
+        
+        # Create spec
+        spec = {
+            "summary": "Test new signature",
+            "decisions": [],
+            "tasks": [
+                {
+                    "id": "T1",
+                    "title": "Update tests for new signature",
+                    "description": "Update existing tests and add new one for newProp",
+                    "tests": [
+                        {"file": "apps/api/test/existing.test.ts", "name": "existing", "asserts": "buildApp with newProp"},
+                        {"file": "apps/api/test/new.test.ts", "name": "new", "asserts": "buildApp with newProp"}
+                    ],
+                    "impl_files": ["apps/api/src/app.ts"]
+                }
+            ]
+        }
+        
+        task = spec["tasks"][0]
+        
+        # Create spec file
+        spec_path = self.repo_root / "docs" / "specs" / "issue-35.md"
+        spec_content = """---
+issue: 35
+status: approved
+test_command: python3 -c "import sys; sys.exit(1)"
+---
+
+# Test spec
+
+## Tareas
+
+### T1: Update tests for new signature
+
+**Tests:**
+- `apps/api/test/existing.test.ts::existing`: buildApp with newProp
+- `apps/api/test/new.test.ts::new`: buildApp with newProp
+
+**Archivos de implementación:**
+- `apps/api/src/app.ts`
+
+**Progreso:**
+- [ ] RED: tests escritos y fallan
+"""
+        spec_path.write_text(spec_content)
+        subprocess.run(["git", "add", str(spec_path)], cwd=self.repo_root, check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "docs: spec"], cwd=self.repo_root, check=True, capture_output=True)
+        
+        # Fake coder that updates existing test and creates new test
+        # Simulates what would trigger TS2353
+        def fake_coder_updates_tests(prompt: str, log_path: str) -> tuple[int, str]:
+            # Update existing test - add extraProp that triggers TS2353
+            existing_test.write_text("""
+import { test } from 'vitest';
+import { buildApp } from '../src/app.js';
+
+test('existing', () => {
+    buildApp({ port: 3000, newProp: 'value', extraProp: true });
+});
+""")
+            
+            # Create new test
+            new_test = self.workspace / "test" / "new.test.ts"
+            new_test.write_text("""
+import { test } from 'vitest';
+import { buildApp } from '../src/app.js';
+
+test('new', () => {
+    buildApp({ port: 4000, newProp: 'another' });
+});
+""")
+            
+            return 0, "Tests updated and created"
+        
+        logs_dir = self.repo_root / ".backlog" / "runs" / "issue-35"
+        
+        # Run RED phase with mock that simulates TS2353
+        result = tdd_runner.run_red_phase(
+            repo_root=str(self.repo_root),
+            issue_num=35,
+            task=task,
+            spec=spec,
+            spec_path=spec_path,
+            test_cmd=["python3", "-c", "import sys; sys.exit(1)"],
+            logs_dir=logs_dir,
+            coder=fake_coder_updates_tests,
+            run_cmd=self._create_mock_run_cmd_with_ts2353_accepted(),
+            input_fn=lambda p: "",
+            print_fn=lambda m: None
+        )
+        
+        # Should return True (success) because TS2353 on BuildAppOptions is accepted
+        self.assertTrue(result, "run_red_phase should return True when TS2353 is on type in impl_file")
+        
+        # Git log should contain commit with test message
+        log_result = self._run(["git", "log", "--oneline", "--grep", "test: Update tests for new signature (#35)", "--fixed-strings"])
+        self.assertIn("test: Update tests for new signature (#35)", log_result.stdout,
+                     "Git log should contain test commit")
+        
+        # Both test files should exist and not be reverted
+        self.assertTrue(existing_test.exists(), "Existing test file should exist")
+        self.assertTrue((self.workspace / "test" / "new.test.ts").exists(), "New test file should exist")
+    
+    def test_e2e_red_exhausted_static_attempts_reverts_all(self) -> None:
+        """run_red_phase con falla estática persistente en todos los intentos y usuario elige 'abortar': git status queda limpio (sin archivos modificados)."""
+        # Create spec
+        spec = {
+            "summary": "Test static failure revert",
+            "decisions": [],
+            "tasks": [
+                {
+                    "id": "T1",
+                    "title": "Test task",
+                    "description": "Test description",
+                    "tests": [{"file": "apps/api/test/fail.test.ts", "name": "fail", "asserts": "expect(false).toBe(true)"}],
+                    "impl_files": ["apps/api/src/fail.ts"]
+                }
+            ]
+        }
+        
+        task = spec["tasks"][0]
+        
+        # Create spec file
+        spec_path = self.repo_root / "docs" / "specs" / "issue-35.md"
+        spec_content = """---
+issue: 35
+status: approved
+test_command: python3 -c "import sys; sys.exit(1)"
+---
+
+# Test spec
+
+## Tareas
+
+### T1: Test task
+
+**Tests:**
+- `apps/api/test/fail.test.ts::fail`: expect(false).toBe(true)
+
+**Archivos de implementación:**
+- `apps/api/src/fail.ts`
+
+**Progreso:**
+- [ ] RED: tests escritos y fallan
+"""
+        spec_path.write_text(spec_content)
+        subprocess.run(["git", "add", str(spec_path)], cwd=self.repo_root, check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "docs: spec"], cwd=self.repo_root, check=True, capture_output=True)
+        
+        # Track coder calls
+        coder_calls = []
+        
+        # Fake coder that always writes invalid TypeScript (implicit any)
+        def fake_coder_always_invalid(prompt: str, log_path: str) -> tuple[int, str]:
+            coder_calls.append(len(coder_calls) + 1)
+            
+            test_file = self.workspace / "test" / "fail.test.ts"
+            # Write code with implicit any (TS7006 - not in acceptable list)
+            test_file.write_text("""
+import { test, expect } from 'vitest';
+
+function helper(x) {  // x has implicit any - TS7006
+    return x;
+}
+
+test('fail', () => {
+    expect(false).toBe(true);
+});
+""")
+            return 0, "Tests written (always invalid)"
+        
+        # Mock run_cmd that simulates tsc rejecting with TS7006
+        def mock_run_cmd_tsc_fail(cmd: list[str], cwd: str | None = None, timeout: int | None = None):
+            from types import SimpleNamespace
+            
+            # For tsc, return failure with TS7006 (not acceptable)
+            if "tsc" in " ".join(cmd):
+                return SimpleNamespace(
+                    returncode=1,
+                    stdout="apps/api/test/fail.test.ts(4,17): error TS7006: Parameter 'x' implicitly has an 'any' type.",
+                    stderr=""
+                )
+            
+            # For test command, would fail but we won't get there
+            if "python3" in cmd and "-c" in cmd:
+                return SimpleNamespace(returncode=1, stdout="Tests failed", stderr="")
+            
+            # For git commands, use real git
+            return self._run(cmd, cwd=cwd, timeout=timeout)
+        
+        # Mock input_fn that chooses 'abortar' after max attempts
+        def mock_input_abortar(prompt: str) -> str:
+            if "Continuar o abortar" in prompt:
+                return "abortar"
+            return ""
+        
+        logs_dir = self.repo_root / ".backlog" / "runs" / "issue-35"
+        
+        # Run RED phase
+        result = tdd_runner.run_red_phase(
+            repo_root=str(self.repo_root),
+            issue_num=35,
+            task=task,
+            spec=spec,
+            spec_path=spec_path,
+            test_cmd=["python3", "-c", "import sys; sys.exit(1)"],
+            logs_dir=logs_dir,
+            coder=fake_coder_always_invalid,
+            run_cmd=mock_run_cmd_tsc_fail,
+            input_fn=mock_input_abortar,
+            print_fn=lambda m: None
+        )
+        
+        # Should return False (aborted)
+        self.assertFalse(result, "run_red_phase should return False when aborted")
+        
+        # Should have exhausted attempts
+        self.assertGreaterEqual(len(coder_calls), 2, "Should have made multiple attempts")
+        
+        # Git status should be clean (all files reverted)
+        status_result = self._run(["git", "status", "--porcelain"])
+        self.assertEqual(status_result.stdout.strip(), "",
+                        "Git working tree should be clean after aborting exhausted static attempts")
+
+
 if __name__ == "__main__":
     unittest.main()
