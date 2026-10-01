@@ -1349,15 +1349,14 @@ def run_red_phase(
         changed_test_files = [f for f in changed if is_test_file(f)]
         
         if changed_test_files:
-            static_feedback = check_test_files_static(repo_root, changed_test_files, run_cmd)
+            static_feedback = check_test_files_static(repo_root, changed_test_files, run_cmd, impl_files)
             
             if static_feedback:
                 print_fn("Los tests de RED no pasan lint/typecheck por sí mismos:")
                 print_fn(static_feedback)
                 
-                # Revert and retry with feedback
-                if changed:
-                    revert_files(repo_root, changed, run_cmd)
+                # Do NOT revert between attempts (D2-A)
+                # Only revert on abort or exhausted attempts
                 
                 if attempt < max_attempts - 1:
                     print_fn("\nReintentando RED con feedback...\n")
@@ -1367,7 +1366,13 @@ def run_red_phase(
                 else:
                     user_choice = input_fn("Continuar o abortar? (continuar/abortar): ").strip().lower()
                     if user_choice == "abortar":
+                        # Revert all changed files on abort
+                        if changed:
+                            revert_files(repo_root, changed, run_cmd)
                         return False
+                    # user chose 'continuar': commit with warning
+                    print_fn("\n⚠️  ADVERTENCIA: Los tests NO pasan lint/typecheck por sí mismos.")
+                    print_fn("Commiteando de todas formas según tu decisión de continuar.\n")
                     break
         
         # All checks passed - commit
