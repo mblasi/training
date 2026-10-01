@@ -1625,5 +1625,107 @@ test_command: python3 -m unittest discover -s tests -v
                         "Production file should have been reverted before second coder invocation")
 
 
+class TestBuildRedPromptFirmaRule(unittest.TestCase):
+    """Test build_red_prompt includes rule 7 about updating tests when signature changes (T6)."""
+    
+    def test_build_red_prompt_contains_firma_rule(self) -> None:
+        """build_red_prompt(spec, task) contiene texto sobre actualizar tests existentes al cambiar firma y sobre no usar casts sobre el argumento completo."""
+        spec = {
+            "summary": "Test issue summary",
+            "decisions": []
+        }
+        
+        task = {
+            "id": "T1",
+            "title": "Test task",
+            "description": "Test description",
+            "tests": [{"file": "test/foo.test.ts", "name": "test_foo", "asserts": "expect(true).toBe(true)"}],
+            "impl_files": ["src/foo.ts"]
+        }
+        
+        result = tdd_runner.build_red_prompt(spec, task)
+        
+        # Check for key phrases in the rule
+        self.assertIn("actualizar", result.lower(), "Prompt should mention updating tests")
+        self.assertIn("firma", result.lower(), "Prompt should mention function signature")
+        self.assertIn("cast", result.lower(), "Prompt should mention casts")
+        self.assertIn("argumento completo", result.lower(), "Prompt should mention full argument cast")
+    
+    def test_build_red_prompt_firma_rule_always_present(self) -> None:
+        """La regla aparece tanto si impl_files es lista vacía como si tiene archivos."""
+        spec = {
+            "summary": "Test issue summary",
+            "decisions": []
+        }
+        
+        # Task with impl_files
+        task_with_impl = {
+            "id": "T1",
+            "title": "Test task with impl",
+            "description": "Test description",
+            "tests": [{"file": "test/foo.test.ts", "name": "test_foo", "asserts": "expect(true).toBe(true)"}],
+            "impl_files": ["src/foo.ts", "src/bar.ts"]
+        }
+        
+        result_with_impl = tdd_runner.build_red_prompt(spec, task_with_impl)
+        
+        # Task without impl_files
+        task_without_impl = {
+            "id": "T2",
+            "title": "Test task without impl",
+            "description": "Test description",
+            "tests": [{"file": "test/baz.test.ts", "name": "test_baz", "asserts": "expect(true).toBe(true)"}],
+            "impl_files": []
+        }
+        
+        result_without_impl = tdd_runner.build_red_prompt(spec, task_without_impl)
+        
+        # Both should contain the firma rule
+        for result in [result_with_impl, result_without_impl]:
+            self.assertIn("actualizar", result.lower(), "Prompt should mention updating tests")
+            self.assertIn("firma", result.lower(), "Prompt should mention function signature")
+    
+    def test_build_red_prompt_rule_count(self) -> None:
+        """El prompt contiene al menos 7 reglas numeradas (la nueva es la 7)."""
+        spec = {
+            "summary": "Test issue summary",
+            "decisions": []
+        }
+        
+        task = {
+            "id": "T1",
+            "title": "Test task",
+            "description": "Test description",
+            "tests": [{"file": "test/foo.test.ts", "name": "test_foo", "asserts": "expect(true).toBe(true)"}],
+            "impl_files": ["src/foo.ts"]
+        }
+        
+        result = tdd_runner.build_red_prompt(spec, task)
+        
+        # Count numbered rules (look for patterns like "1. ", "2. ", etc.)
+        import re
+        # Match lines that start with a number followed by a dot and space
+        rule_pattern = re.compile(r'^\d+\.\s', re.MULTILINE)
+        rule_matches = rule_pattern.findall(result)
+        
+        # Should have at least 7 rules
+        self.assertGreaterEqual(len(rule_matches), 7, 
+                               f"Prompt should contain at least 7 numbered rules, found {len(rule_matches)}")
+        
+        # Extract rule 7 specifically (find "7. " followed by the rule text until next rule or end)
+        rule_7_pattern = re.compile(r'7\.\s+(.+?)(?=\n\d+\.\s|\n\n|$)', re.DOTALL)
+        rule_7_match = rule_7_pattern.search(result)
+        
+        self.assertIsNotNone(rule_7_match, "Rule 7 should exist")
+        
+        rule_7_text = rule_7_match.group(1).lower()
+        
+        # Rule 7 should mention signature changes
+        self.assertTrue(
+            "firma" in rule_7_text or "signature" in rule_7_text,
+            f"Rule 7 should mention function signature. Rule 7 text: {rule_7_text}"
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

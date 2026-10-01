@@ -147,7 +147,7 @@ Agregar regla 7 siempre presente en build_red_prompt: actualizar tests existente
 - `scripts/tdd_runner.py`
 
 **Progreso:**
-- [ ] RED: tests escritos y fallan
+- [x] RED: tests escritos y fallan
 - [ ] GREEN: tests pasan
 - [ ] REFACTOR: código limpio
 
