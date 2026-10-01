@@ -4,12 +4,11 @@
 
 ## 🚧 En curso (WIP)
 
-- [ ] [#35](https://github.com/mblasi/training/issues/35) Harness: RED rechaza tests legítimos cuando cambia una firma de producción (TS2353) y el revert descarta ediciones correctas · fix · @mblasi
 - [ ] [#11](https://github.com/mblasi/training/issues/11) Auth con Firebase (Google + email/password) en api, admin y mobile · feat · @mblasi
 
 ## 👀 En revisión
 
-_Nada por ahora._
+- [ ] [#35](https://github.com/mblasi/training/issues/35) Harness: RED rechaza tests legítimos cuando cambia una firma de producción (TS2353) y el revert descarta ediciones correctas · fix · @mblasi
 
 ## 📋 Pendiente
 
