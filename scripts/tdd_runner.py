@@ -1937,6 +1937,8 @@ def build_red_prompt(spec: dict[str, Any], task: dict[str, Any]) -> str:
     rule_num += 1
     lines.append(f"{rule_num}. Antes de escribir asserts sobre una librería, verificá su API real en la versión instalada (tipos .d.ts en node_modules, o el código fuente) — no asumas la forma de los objetos.")
     rule_num += 1
+    lines.append(f"{rule_num}. Si la tarea cambia la firma de una función existente, actualizar todos los tests existentes que la llaman; no usar casts sobre el argumento completo (ej: fn({{ a, b }} as never)) para evitar errores de tipo")
+    rule_num += 1
     lines.append(f"{rule_num}. Si un test de la lista ya existe en el archivo, modificalo para que cumpla lo indicado (no dupliques)")
     rule_num += 1
     lines.append(f"{rule_num}. Leé los tests existentes de los archivos que tocás: si alguno NO listado contradice esta tarea o las decisiones acordadas, escribí `/DESVIO <test y contradicción>` y frená; no lo cambies en silencio ni lo dejes")
