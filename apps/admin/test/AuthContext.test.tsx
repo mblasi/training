@@ -6,8 +6,8 @@ import type { Auth, User } from 'firebase/auth';
 vi.mock('firebase/auth', () => ({
   connectAuthEmulator: vi.fn(),
   getAuth: vi.fn(),
-  GoogleAuthProvider: vi.fn(function GoogleAuthProvider() {
-    return {};
+  GoogleAuthProvider: vi.fn(function GoogleAuthProvider(this: object) {
+    Object.assign(this, { providerId: 'google.com' });
   }),
   signInWithPopup: vi.fn(),
   signOut: vi.fn(),
@@ -33,6 +33,7 @@ describe('firebaseConfig', () => {
   beforeEach(() => {
     vi.resetModules();
     mockConnectAuthEmulator.mockClear();
+    mockGetAuth.mockReturnValue({ currentUser: null } as Auth);
   });
 
   afterEach(() => {
