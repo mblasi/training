@@ -6,6 +6,7 @@ import { buildApp } from '../src/app.js';
 
 describe('Auth integration with emulator', () => {
   let db: ReturnType<typeof createDb> | undefined;
+  let app: ReturnType<typeof buildApp> | undefined;
   let testUserToken: string;
   let adminUserToken: string;
 
@@ -31,6 +32,13 @@ describe('Auth integration with emulator', () => {
     initializeApp({ projectId: process.env.FIREBASE_PROJECT_ID || 'demo-trainia' });
     const auth = getAuth();
 
+    // Build app once for all tests
+    app = buildApp({
+      db,
+      auth: { verifyIdToken: auth.verifyIdToken.bind(auth) },
+      adminEmails: ['admin@test.local'],
+    });
+
     // Create test users and get tokens
     const testUser = await auth.createUser({
       email: 'test@example.com',
@@ -52,13 +60,7 @@ describe('Auth integration with emulator', () => {
   });
 
   test('/me without Authorization header returns 401', async () => {
-    if (!db) throw new Error('DB not initialized');
-
-    const app = buildApp({
-      db,
-      auth: { verifyIdToken: getAuth().verifyIdToken.bind(getAuth()) },
-      adminEmails: ['admin@test.local'],
-    });
+    if (!app) throw new Error('App not initialized');
 
     const response = await app.inject({
       method: 'GET',
@@ -69,13 +71,7 @@ describe('Auth integration with emulator', () => {
   });
 
   test('/me with valid token returns 200 with user data', async () => {
-    if (!db) throw new Error('DB not initialized');
-
-    const app = buildApp({
-      db,
-      auth: { verifyIdToken: getAuth().verifyIdToken.bind(getAuth()) },
-      adminEmails: ['admin@test.local'],
-    });
+    if (!app) throw new Error('App not initialized');
 
     const response = await app.inject({
       method: 'GET',
@@ -92,13 +88,7 @@ describe('Auth integration with emulator', () => {
   });
 
   test('/admin/ping with non-admin user returns 403', async () => {
-    if (!db) throw new Error('DB not initialized');
-
-    const app = buildApp({
-      db,
-      auth: { verifyIdToken: getAuth().verifyIdToken.bind(getAuth()) },
-      adminEmails: ['admin@test.local'],
-    });
+    if (!app) throw new Error('App not initialized');
 
     const response = await app.inject({
       method: 'GET',
@@ -112,13 +102,7 @@ describe('Auth integration with emulator', () => {
   });
 
   test('/admin/ping with admin user returns 200', async () => {
-    if (!db) throw new Error('DB not initialized');
-
-    const app = buildApp({
-      db,
-      auth: { verifyIdToken: getAuth().verifyIdToken.bind(getAuth()) },
-      adminEmails: ['admin@test.local'],
-    });
+    if (!app) throw new Error('App not initialized');
 
     const response = await app.inject({
       method: 'GET',

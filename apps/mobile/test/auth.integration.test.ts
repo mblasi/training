@@ -22,16 +22,12 @@ describe('Auth integration with emulator', () => {
   });
 
   test('signInWithEmail succeeds with correct credentials', async () => {
-    // Create a test user via the emulator (using signInWithEmailAndPassword which auto-creates users in emulator)
     const email = 'test@example.com';
     const password = 'password123';
 
-    // First create the user in the emulator
-    await signInWithEmailAndPassword(auth, email, password).catch(() => {
-      // User might not exist, that's ok for first run
-    });
+    // signInWithEmailAndPassword auto-creates users in the emulator
+    await signInWithEmailAndPassword(auth, email, password);
 
-    // Now test our function
     const result = await signInWithEmail(auth, email, password);
     expect(result.user).toBeDefined();
     expect(result.user.email).toBe(email);
