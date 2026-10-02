@@ -274,7 +274,7 @@ Agregar firebase@12.19.0, @react-native-google-signin/google-signin@16.x, @react
 
 **Progreso:**
 - [x] RED: tests escritos y fallan
-- [ ] GREEN: tests pasan
+- [x] GREEN: tests pasan
 - [ ] REFACTOR: código limpio
 
 ### T8: CI: setup-java + emulators:exec + archivos de integración + README

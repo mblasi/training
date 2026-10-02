@@ -15,6 +15,9 @@
       "ios",
       "android",
       "web"
+    ],
+    "plugins": [
+      "@react-native-google-signin/google-signin"
     ]
   }
 }
