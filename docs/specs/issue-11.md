@@ -1,6 +1,6 @@
 ---
 issue: 11
-status: implementing
+status: done
 test_command: python3 -m unittest discover -s tests -v && corepack pnpm install --frozen-lockfile && corepack pnpm lint && corepack pnpm typecheck && corepack pnpm test
 ---
 
