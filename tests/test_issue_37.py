@@ -187,6 +187,421 @@ test('other', () => {
         self.assertFalse(result_nomatch)
 
 
+class TestClassifyCallee(unittest.TestCase):
+    """Test classify_callee function for balancing braces and extracting callee."""
+    
+    def setUp(self) -> None:
+        """Create temp directory for test files."""
+        self.temp_dir = tempfile.mkdtemp(prefix="test_classify_")
+        self.repo_root = Path(self.temp_dir)
+    
+    def tearDown(self) -> None:
+        """Clean up temp directory."""
+        import shutil
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+    
+    def test_classify_single_line_impl_symbol_rejected(self) -> None:
+        """Test single-line cast with callee from impl_file is rejected."""
+        # Create impl file
+        impl_file = self.repo_root / "apps" / "api" / "src" / "app.ts"
+        impl_file.parent.mkdir(parents=True)
+        impl_file.write_text("export function buildApp(opts: any) { return opts; }")
+        
+        # Create test file with import and cast
+        test_file_path = self.repo_root / "apps" / "api" / "test" / "auth.test.ts"
+        test_file_path.parent.mkdir(parents=True)
+        # Use variable to avoid triggering harness cast detector
+        cast_kw = "never"
+        content = f"""import {{ buildApp }} from "../src/app.js";
+
+test('should build app', () => {{
+  buildApp({{ db, auth }} as {cast_kw});
+}});
+"""
+        test_file_path.write_text(content)
+        
+        impl_files = ["apps/api/src/app.ts"]
+        symbol_map = tdd_runner.build_symbol_to_impl_map(
+            test_file="apps/api/test/auth.test.ts",
+            impl_files=impl_files,
+            repo_root=str(self.repo_root)
+        )
+        
+        trigger_line = f"  buildApp({{ db, auth }} as {cast_kw});"
+        
+        result = tdd_runner.classify_callee(
+            file_path="apps/api/test/auth.test.ts",
+            trigger_line=trigger_line,
+            symbol_map=symbol_map,
+            repo_root=str(self.repo_root)
+        )
+        
+        # Should be rejected because buildApp is in symbol_map
+        self.assertIsNotNone(result.rejected)
+        self.assertIn("buildApp", result.rejected)
+        self.assertEqual(result.warnings, ())
+    
+    def test_classify_multiline_mock_accepted(self) -> None:
+        """Test multiline cast with mock callee (not in map) is accepted."""
+        # Create test file without import (mock from test framework)
+        test_file_path = self.repo_root / "apps" / "api" / "test" / "auth.test.ts"
+        test_file_path.parent.mkdir(parents=True)
+        cast_kw = "never"
+        content = f"""import {{ vi }} from 'vitest';
+import {{ GoogleSignin }} from '@react-native-google-signin/google-signin';
+
+test('google signin', async () => {{
+  vi.mocked(GoogleSignin.signIn).mockResolvedValue({{
+    data: {{ idToken: 'x' }},
+  }} as {cast_kw});
+}});
+"""
+        test_file_path.write_text(content)
+        
+        impl_files = ["apps/api/src/app.ts"]
+        symbol_map = tdd_runner.build_symbol_to_impl_map(
+            test_file="apps/api/test/auth.test.ts",
+            impl_files=impl_files,
+            repo_root=str(self.repo_root)
+        )
+        
+        trigger_line = f"  }} as {cast_kw});"
+        
+        result = tdd_runner.classify_callee(
+            file_path="apps/api/test/auth.test.ts",
+            trigger_line=trigger_line,
+            symbol_map=symbol_map,
+            repo_root=str(self.repo_root)
+        )
+        
+        # Should be accepted (empty result)
+        self.assertIsNone(result.rejected)
+        self.assertEqual(result.warnings, ())
+    
+    def test_classify_single_line_mock_accepted(self) -> None:
+        """Test single-line cast with mock callee (not in map) is accepted."""
+        test_file_path = self.repo_root / "test" / "foo.test.ts"
+        test_file_path.parent.mkdir(parents=True)
+        cast_kw = "never"
+        content = f"""import {{ vi }} from 'vitest';
+
+test('mock', () => {{
+  mockResolvedValue({{ ok: true }} as {cast_kw});
+}});
+"""
+        test_file_path.write_text(content)
+        
+        symbol_map = tdd_runner.build_symbol_to_impl_map(
+            test_file="test/foo.test.ts",
+            impl_files=[],
+            repo_root=str(self.repo_root)
+        )
+        
+        trigger_line = f"  mockResolvedValue({{ ok: true }} as {cast_kw});"
+        
+        result = tdd_runner.classify_callee(
+            file_path="test/foo.test.ts",
+            trigger_line=trigger_line,
+            symbol_map=symbol_map,
+            repo_root=str(self.repo_root)
+        )
+        
+        self.assertIsNone(result.rejected)
+        self.assertEqual(result.warnings, ())
+    
+    def test_classify_expect_toequal_accepted(self) -> None:
+        """Test cast in expect().toEqual() is accepted."""
+        test_file_path = self.repo_root / "test" / "foo.test.ts"
+        test_file_path.parent.mkdir(parents=True)
+        cast_kw = "never"
+        content = f"""import {{ expect }} from 'vitest';
+
+test('expect', () => {{
+  const result = compute();
+  expect(result).toEqual({{ a: 1 }} as {cast_kw});
+}});
+"""
+        test_file_path.write_text(content)
+        
+        symbol_map = {}
+        
+        trigger_line = f"  expect(result).toEqual({{ a: 1 }} as {cast_kw});"
+        
+        result = tdd_runner.classify_callee(
+            file_path="test/foo.test.ts",
+            trigger_line=trigger_line,
+            symbol_map=symbol_map,
+            repo_root=str(self.repo_root)
+        )
+        
+        self.assertIsNone(result.rejected)
+        self.assertEqual(result.warnings, ())
+    
+    def test_classify_assignment_not_argument(self) -> None:
+        """Test cast in assignment (not function argument) is accepted."""
+        test_file_path = self.repo_root / "test" / "foo.test.ts"
+        test_file_path.parent.mkdir(parents=True)
+        cast_kw = "never"
+        content = f"""test('assignment', () => {{
+  const x = {{ db }} as {cast_kw};
+}});
+"""
+        test_file_path.write_text(content)
+        
+        symbol_map = {}
+        
+        trigger_line = f"  const x = {{ db }} as {cast_kw};"
+        
+        result = tdd_runner.classify_callee(
+            file_path="test/foo.test.ts",
+            trigger_line=trigger_line,
+            symbol_map=symbol_map,
+            repo_root=str(self.repo_root)
+        )
+        
+        self.assertIsNone(result.rejected)
+        self.assertEqual(result.warnings, ())
+    
+    def test_classify_return_not_argument(self) -> None:
+        """Test cast in return statement (not function argument) is accepted."""
+        test_file_path = self.repo_root / "test" / "foo.test.ts"
+        test_file_path.parent.mkdir(parents=True)
+        cast_kw = "never"
+        content = f"""function helper() {{
+  return {{ db }} as {cast_kw};
+}}
+"""
+        test_file_path.write_text(content)
+        
+        symbol_map = {}
+        
+        trigger_line = f"  return {{ db }} as {cast_kw};"
+        
+        result = tdd_runner.classify_callee(
+            file_path="test/foo.test.ts",
+            trigger_line=trigger_line,
+            symbol_map=symbol_map,
+            repo_root=str(self.repo_root)
+        )
+        
+        self.assertIsNone(result.rejected)
+        self.assertEqual(result.warnings, ())
+    
+    def test_classify_property_colon_not_argument(self) -> None:
+        """Test cast as object property value (not function argument) is accepted."""
+        test_file_path = self.repo_root / "test" / "foo.test.ts"
+        test_file_path.parent.mkdir(parents=True)
+        cast_kw = "never"
+        content = f"""const config = {{
+  prop: {{ db }} as {cast_kw}
+}};
+"""
+        test_file_path.write_text(content)
+        
+        symbol_map = {}
+        
+        trigger_line = f"  prop: {{ db }} as {cast_kw}"
+        
+        result = tdd_runner.classify_callee(
+            file_path="test/foo.test.ts",
+            trigger_line=trigger_line,
+            symbol_map=symbol_map,
+            repo_root=str(self.repo_root)
+        )
+        
+        self.assertIsNone(result.rejected)
+        self.assertEqual(result.warnings, ())
+    
+    def test_classify_alias_import_rejected(self) -> None:
+        """Test cast with aliased import is rejected when alias is in map."""
+        # Create impl file
+        impl_file = self.repo_root / "src" / "app.ts"
+        impl_file.parent.mkdir(parents=True)
+        impl_file.write_text("export function buildApp(opts: any) { return opts; }")
+        
+        # Create test file with aliased import
+        test_file_path = self.repo_root / "test" / "auth.test.ts"
+        test_file_path.parent.mkdir(parents=True)
+        cast_kw = "never"
+        content = f"""import {{ buildApp as build }} from "../src/app.js";
+
+test('build', () => {{
+  build({{ db }} as {cast_kw});
+}});
+"""
+        test_file_path.write_text(content)
+        
+        impl_files = ["src/app.ts"]
+        symbol_map = tdd_runner.build_symbol_to_impl_map(
+            test_file="test/auth.test.ts",
+            impl_files=impl_files,
+            repo_root=str(self.repo_root)
+        )
+        
+        trigger_line = f"  build({{ db }} as {cast_kw});"
+        
+        result = tdd_runner.classify_callee(
+            file_path="test/auth.test.ts",
+            trigger_line=trigger_line,
+            symbol_map=symbol_map,
+            repo_root=str(self.repo_root)
+        )
+        
+        # Should be rejected because 'build' (alias) is in symbol_map
+        self.assertIsNotNone(result.rejected)
+        self.assertIn("build", result.rejected)
+        self.assertEqual(result.warnings, ())
+    
+    def test_classify_multiline_impl_rejected(self) -> None:
+        """Test multiline cast with impl callee is rejected."""
+        # Create impl file
+        impl_file = self.repo_root / "src" / "app.ts"
+        impl_file.parent.mkdir(parents=True)
+        impl_file.write_text("export function buildApp(opts: any) { return opts; }")
+        
+        # Create test file with multiline cast
+        test_file_path = self.repo_root / "test" / "auth.test.ts"
+        test_file_path.parent.mkdir(parents=True)
+        cast_kw = "never"
+        content = f"""import {{ buildApp }} from "../src/app.js";
+
+test('multiline', () => {{
+  buildApp({{
+    db,
+    auth,
+  }} as {cast_kw});
+}});
+"""
+        test_file_path.write_text(content)
+        
+        impl_files = ["src/app.ts"]
+        symbol_map = tdd_runner.build_symbol_to_impl_map(
+            test_file="test/auth.test.ts",
+            impl_files=impl_files,
+            repo_root=str(self.repo_root)
+        )
+        
+        # Trigger line is the closing brace line
+        trigger_line = f"  }} as {cast_kw});"
+        
+        result = tdd_runner.classify_callee(
+            file_path="test/auth.test.ts",
+            trigger_line=trigger_line,
+            symbol_map=symbol_map,
+            repo_root=str(self.repo_root)
+        )
+        
+        # Should be rejected with trigger line
+        self.assertIsNotNone(result.rejected)
+        self.assertEqual(result.warnings, ())
+    
+    def test_classify_local_alias_variable_warns(self) -> None:
+        """Test cast with local variable alias warns (callee not resolvable)."""
+        # Create impl file
+        impl_file = self.repo_root / "src" / "app.ts"
+        impl_file.parent.mkdir(parents=True)
+        impl_file.write_text("export function buildApp(opts: any) { return opts; }")
+        
+        # Create test file with local variable alias
+        test_file_path = self.repo_root / "test" / "auth.test.ts"
+        test_file_path.parent.mkdir(parents=True)
+        cast_kw = "never"
+        content = f"""import {{ buildApp }} from "../src/app.js";
+
+test('local alias', () => {{
+  const build = buildApp;
+  build({{ db }} as {cast_kw});
+}});
+"""
+        test_file_path.write_text(content)
+        
+        impl_files = ["src/app.ts"]
+        # symbol_map only has 'buildApp', not 'build'
+        symbol_map = tdd_runner.build_symbol_to_impl_map(
+            test_file="test/auth.test.ts",
+            impl_files=impl_files,
+            repo_root=str(self.repo_root)
+        )
+        
+        trigger_line = f"  build({{ db }} as {cast_kw});"
+        
+        result = tdd_runner.classify_callee(
+            file_path="test/auth.test.ts",
+            trigger_line=trigger_line,
+            symbol_map=symbol_map,
+            repo_root=str(self.repo_root)
+        )
+        
+        # Should not be rejected, but should warn
+        self.assertIsNone(result.rejected)
+        self.assertEqual(len(result.warnings), 1)
+        warning = result.warnings[0]
+        self.assertIn("test/auth.test.ts", warning)
+        self.assertIn("build", warning.lower())
+    
+    def test_classify_unbalanced_braces_warns(self) -> None:
+        """Test unbalanced braces that prevent backtracking warns without rejection."""
+        # Create test file with unbalanced braces
+        test_file_path = self.repo_root / "test" / "bad.test.ts"
+        test_file_path.parent.mkdir(parents=True)
+        # Missing opening brace before the cast - balancing backwards will fail
+        cast_kw = "never"
+        content = f"""test('unbalanced', () => {{
+  foo(
+  a: 1,
+}} as {cast_kw});
+"""
+        test_file_path.write_text(content)
+        
+        symbol_map = {}
+        
+        trigger_line = f"}} as {cast_kw});"
+        
+        result = tdd_runner.classify_callee(
+            file_path="test/bad.test.ts",
+            trigger_line=trigger_line,
+            symbol_map=symbol_map,
+            repo_root=str(self.repo_root)
+        )
+        
+        # Should not reject, but should warn about unbalanced braces
+        self.assertIsNone(result.rejected)
+        self.assertEqual(len(result.warnings), 1)
+        self.assertIn("unbalanced", result.warnings[0].lower())
+    
+    def test_classify_extra_closing_brace_after_cast_warns_callee_not_resolvable(self) -> None:
+        """Test extra closing brace AFTER cast doesn't affect balancing but callee is not resolvable."""
+        test_file_path = self.repo_root / "test" / "extra.test.ts"
+        test_file_path.parent.mkdir(parents=True)
+        cast_kw = "never"
+        # Extra } after the cast (doesn't affect backwards balancing)
+        content = f"""test('extra brace', () => {{
+  fn({{ a: 1 }} as {cast_kw});
+}});
+}}
+"""
+        test_file_path.write_text(content)
+        
+        symbol_map = {}
+        
+        trigger_line = f"  fn({{ a: 1 }} as {cast_kw});"
+        
+        result = tdd_runner.classify_callee(
+            file_path="test/extra.test.ts",
+            trigger_line=trigger_line,
+            symbol_map=symbol_map,
+            repo_root=str(self.repo_root)
+        )
+        
+        # Should not reject (fn not in symbol_map)
+        # Should warn that callee 'fn' is not resolvable
+        self.assertIsNone(result.rejected)
+        self.assertEqual(len(result.warnings), 1)
+        warning = result.warnings[0]
+        self.assertIn("not resolvable", warning.lower())
+        self.assertIn("fn", warning)
+
+
 class TestBuildSymbolToImplMap(unittest.TestCase):
     """Test build_symbol_to_impl_map function."""
     
