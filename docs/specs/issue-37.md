@@ -49,7 +49,7 @@ Definir CastCheckResult frozen dataclass y extraer resolve_import_to_impl_file d
 
 **Progreso:**
 - [x] RED: tests escritos y fallan
-- [ ] GREEN: tests pasan
+- [x] GREEN: tests pasan
 - [ ] REFACTOR: código limpio
 
 ### T2: build_symbol_to_impl_map: mapeo símbolo local → impl_file

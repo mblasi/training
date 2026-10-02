@@ -10,6 +10,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
@@ -17,6 +18,19 @@ from typing import Any, Callable
 sys.path.insert(0, str(Path(__file__).parent))
 
 from take_agent import parse_spec_markdown, set_status, mark_progress, unmark_progress
+
+
+@dataclass(frozen=True)
+class CastCheckResult:
+    """
+    Result of a cast check operation.
+    
+    Attributes:
+        rejected: The line that should be rejected, or None if no rejection
+        warnings: Tuple of warning messages (empty tuple by default)
+    """
+    rejected: str | None = None
+    warnings: tuple[str, ...] = ()
 
 
 # Empty run detection patterns (compiled regexes, anchored at line start)
@@ -100,6 +114,66 @@ def extract_ts_error_type_name(error_code: str, error_message: str) -> str | Non
     return None
 
 
+def resolve_import_to_impl_file(
+    test_file: str,
+    import_path: str,
+    impl_files: list[str],
+    repo_root: str
+) -> str | None:
+    """
+    Resolve a single import path to an impl_file.
+    
+    Resolves relative imports with extension resolution (.js -> .ts, no ext -> .ts).
+    
+    Args:
+        test_file: Test file path (relative to repo_root)
+        import_path: Import path string from test file
+        impl_files: List of implementation file paths (relative to repo_root)
+        repo_root: Absolute path to repository root
+    
+    Returns:
+        The matching impl_file path, or None if no match
+    """
+    # Skip non-relative imports (node_modules)
+    if not import_path.startswith('.'):
+        return None
+    
+    test_path = Path(repo_root) / test_file
+    test_dir = test_path.parent
+    
+    # Resolve relative path
+    resolved = (test_dir / import_path).resolve()
+    
+    # Try multiple extensions for extension resolution
+    # .js -> .ts, no ext -> .ts
+    candidates = []
+    
+    if resolved.suffix == ".js":
+        # Try replacing .js with .ts
+        candidates.append(resolved.with_suffix(".ts"))
+    elif resolved.suffix == "":
+        # Try adding .ts extension
+        candidates.append(resolved.with_suffix(".ts"))
+    else:
+        # Use as-is
+        candidates.append(resolved)
+    
+    # Check if any candidate matches an impl_file
+    for candidate in candidates:
+        # Normalize path to be relative to repo_root
+        try:
+            rel_path = candidate.relative_to(Path(repo_root))
+            normalized = str(rel_path).replace("\\", "/")
+            
+            if normalized in impl_files:
+                return normalized
+        except ValueError:
+            # Not relative to repo_root, skip
+            continue
+    
+    return None
+
+
 def test_imports_impl_file(test_file: str, impl_files: list[str], repo_root: str) -> bool:
     """
     Check if a test file imports a module that resolves to any impl_file.
@@ -144,43 +218,10 @@ def test_imports_impl_file(test_file: str, impl_files: list[str], repo_root: str
     # Flatten match groups (each match is a tuple of 3 groups, only one is non-empty)
     import_paths = [m for group in matches for m in group if m]
     
-    # Resolve each import path
-    test_dir = test_path.parent
-    
+    # Resolve each import path using resolve_import_to_impl_file
     for import_path in import_paths:
-        # Skip non-relative imports (node_modules)
-        if not import_path.startswith('.'):
-            continue
-        
-        # Resolve relative path
-        resolved = (test_dir / import_path).resolve()
-        
-        # Try multiple extensions for extension resolution
-        # .js -> .ts, no ext -> .ts
-        candidates = []
-        
-        if resolved.suffix == ".js":
-            # Try replacing .js with .ts
-            candidates.append(resolved.with_suffix(".ts"))
-        elif resolved.suffix == "":
-            # Try adding .ts extension
-            candidates.append(resolved.with_suffix(".ts"))
-        else:
-            # Use as-is
-            candidates.append(resolved)
-        
-        # Check if any candidate matches an impl_file
-        for candidate in candidates:
-            # Normalize path to be relative to repo_root
-            try:
-                rel_path = candidate.relative_to(Path(repo_root))
-                normalized = str(rel_path).replace("\\", "/")
-                
-                if normalized in impl_files:
-                    return True
-            except ValueError:
-                # Not relative to repo_root, skip
-                continue
+        if resolve_import_to_impl_file(test_file, import_path, impl_files, repo_root):
+            return True
     
     return False
 
