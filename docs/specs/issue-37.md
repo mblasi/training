@@ -105,7 +105,7 @@ Implementar el algoritmo de balanceo que dado un archivo y la línea disparadora
 - `scripts/tdd_runner.py`
 
 **Progreso:**
-- [x] RED: tests escritos y fallan
+- [ ] RED: tests escritos y fallan
 - [ ] GREEN: tests pasan
 - [ ] REFACTOR: código limpio
 
