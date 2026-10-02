@@ -72,7 +72,7 @@ Parsear imports estáticos y dinámicos desestructurados del test y construir ma
 - `scripts/tdd_runner.py`
 
 **Progreso:**
-- [ ] RED: tests escritos y fallan
+- [x] RED: tests escritos y fallan
 - [ ] GREEN: tests pasan
 - [ ] REFACTOR: código limpio
 
