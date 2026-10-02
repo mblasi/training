@@ -267,7 +267,7 @@ Agregar firebase@12.19.0, @react-native-google-signin/google-signin@16.x, @react
 - `apps/mobile/app/login.tsx`
 - `apps/mobile/app/index.tsx`
 - `apps/mobile/app.json`
-- `apps/mobile/tsconfig.json`
+- `apps/mobile/src/firebase-auth-rn.d.ts`
 - `apps/mobile/package.json`
 - `apps/mobile/vitest.config.ts`
 - `pnpm-lock.yaml`
