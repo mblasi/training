@@ -1,7 +1,14 @@
-import { describe, test, expect } from 'vitest';
+import { describe, test, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import App from '../src/App';
 import { parseHealthResponse } from '../src/health';
+import type { ReactNode } from 'react';
+
+// Mock AuthContext para tests aislados de App
+vi.mock('../src/auth/AuthContext', () => ({
+  AuthProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
+  useAuth: () => ({ role: 'admin', user: { uid: 'test-uid' }, login: vi.fn(), logout: vi.fn() }),
+}));
 
 describe('Admin App', () => {
   test('test_app_renders_trainia_heading', () => {
