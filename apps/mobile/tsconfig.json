@@ -4,7 +4,6 @@
     "target": "ESNext",
     "module": "ESNext",
     "moduleResolution": "Bundler",
-    "customConditions": ["react-native"],
     "jsx": "react-jsx"
   },
   "include": ["app/**/*", "src/**/*", "test/**/*"]
