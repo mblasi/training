@@ -257,7 +257,7 @@ Agregar firebase@12.19.0, @react-native-google-signin/google-signin@16.x, @react
 
 **Archivos de soporte de tests:**
 - `apps/mobile/package.json`
-- `apps/mobile/src/firebase-auth-rn.d.ts`
+- `apps/mobile/tsconfig.json`
 - `apps/mobile/vitest.config.ts`
 
 **Archivos de implementación:**
