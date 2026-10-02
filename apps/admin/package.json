@@ -13,7 +13,8 @@
   "dependencies": {
     "react": "19.2.3",
     "react-dom": "19.2.3",
-    "@trainia/shared": "workspace:*"
+    "@trainia/shared": "workspace:*",
+    "firebase": "12.19.0"
   },
   "devDependencies": {
     "@testing-library/jest-dom": "^6.6.3",
