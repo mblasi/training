@@ -236,7 +236,7 @@ Agregar firebase@12.19.0; crear src/auth/firebaseConfig.ts con connectAuthEmulat
 
 **Progreso:**
 - [x] RED: tests escritos y fallan
-- [ ] GREEN: tests pasan
+- [x] GREEN: tests pasan
 - [ ] REFACTOR: código limpio
 
 ### T7: Mobile: src/auth/index.ts + firebaseAuth.ts + AuthContext + pantalla login + unit tests
