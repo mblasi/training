@@ -8,7 +8,7 @@ _Nada por ahora._
 
 ## 👀 En revisión
 
-- [ ] [#11](https://github.com/mblasi/training/issues/11) Auth con Firebase (Google + email/password) en api, admin y mobile · feat · @mblasi
+_Nada por ahora._
 
 ## 📋 Pendiente
 
@@ -21,6 +21,7 @@ _Nada por ahora._
 
 ## ✅ Hecho
 
+- [x] [#11](https://github.com/mblasi/training/issues/11) Auth con Firebase (Google + email/password) en api, admin y mobile · feat · @mblasi
 - [x] [#35](https://github.com/mblasi/training/issues/35) Harness: RED rechaza tests legítimos cuando cambia una firma de producción (TS2353) y el revert descarta ediciones correctas · fix · @mblasi
 - [x] [#33](https://github.com/mblasi/training/issues/33) Harness: RED debe rechazar tests que no pasan lint/typecheck por sí mismos (y mocks tautológicos) · fix · @mblasi
 - [x] [#31](https://github.com/mblasi/training/issues/31) Harness: merge deja status:review en issues cerrados · fix · @mblasi
