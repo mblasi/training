@@ -50,6 +50,12 @@ jobs:
         with:
           node-version: '24'
       
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+      
       - name: Enable corepack
         run: corepack enable
       
@@ -74,8 +80,13 @@ jobs:
       - name: Seed database (second run - idempotency check)
         run: pnpm --filter @trainia/api db:seed
       
-      - name: Run integration tests
-        run: pnpm --filter @trainia/api test:integration
+      - name: Run integration tests with Firebase Auth Emulator
+        run: firebase emulators:exec --only auth --project demo-trainia "pnpm --filter @trainia/api test:integration && pnpm --filter @trainia/mobile test:integration"
+        env:
+          FIREBASE_PROJECT_ID: demo-trainia
+          FIREBASE_AUTH_EMULATOR_HOST: 127.0.0.1:9099
+          EXPO_PUBLIC_FIREBASE_AUTH_EMULATOR_HOST: 127.0.0.1:9099
+          ADMIN_EMAILS: admin@test.local
       
       - name: Generate migrations (drift check)
         run: pnpm --filter @trainia/api db:generate

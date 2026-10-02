@@ -11,6 +11,7 @@ Trainia (trainia.blasi.ar): app de entrenamiento autogestionada con un equipo de
 
 - Node 24 LTS (ver `.nvmrc`)
 - Corepack habilitado: `corepack enable`
+- JDK 21 (para Firebase Auth Emulator en tests de integración)
 
 ### Comandos raíz
 
@@ -90,6 +91,29 @@ corepack pnpm --filter ./apps/mobile exec expo export --platform web --output-di
 ```
 
 **Nota**: Expo SDK 57 funciona con pnpm en modo isolated (sin `node-linker=hoisted`). El setup usa `metro.config.js` para resolver workspaces y `babel.config.cjs` con `babel-preset-expo`.
+
+### Firebase Auth
+
+Las apps usan Firebase Auth para autenticación. Variables de entorno necesarias:
+
+**Para desarrollo:**
+- `FIREBASE_PROJECT_ID`: ID del proyecto Firebase (en producción) o `demo-trainia` (desarrollo local con emulador)
+- `FIREBASE_AUTH_EMULATOR_HOST`: URL del emulador (ej: `127.0.0.1:9099`). Si está definida, la API se conecta al emulador en lugar de Firebase real
+- `EXPO_PUBLIC_FIREBASE_AUTH_EMULATOR_HOST`: URL del emulador para apps cliente (admin y mobile)
+- `EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID`: Client ID de Google OAuth para sign-in (solo producción)
+- `ADMIN_EMAILS`: Lista de emails separados por coma que tienen rol admin (ej: `admin@example.com,otro@example.com`)
+
+**Tests de integración:**
+
+Los tests de integración de auth requieren el Firebase Auth Emulator. En CI esto se maneja automáticamente con `firebase emulators:exec`. Para desarrollo local:
+
+```bash
+# Instalar firebase-tools si no está
+pnpm install
+
+# Correr tests de integración con emulador
+firebase emulators:exec --only auth --project demo-trainia "pnpm --filter @trainia/api test:integration && pnpm --filter @trainia/mobile test:integration"
+```
 
 ## Flujo de trabajo
 

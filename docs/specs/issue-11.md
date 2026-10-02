@@ -317,7 +317,7 @@ Modificar ci.yml: agregar actions/setup-java (temurin 21), step firebase emulato
 
 **Progreso:**
 - [x] RED: tests escritos y fallan
-- [ ] GREEN: tests pasan
+- [x] GREEN: tests pasan
 - [ ] REFACTOR: código limpio
 
 ## Fuera de alcance
