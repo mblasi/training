@@ -269,7 +269,7 @@ Agregar firebase@12.19.0, @react-native-google-signin/google-signin@16.x, @react
 - `pnpm-lock.yaml`
 
 **Progreso:**
-- [x] RED: tests escritos y fallan
+- [ ] RED: tests escritos y fallan
 - [ ] GREEN: tests pasan
 - [ ] REFACTOR: código limpio
 
