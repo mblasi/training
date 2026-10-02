@@ -4,11 +4,11 @@
 
 ## 🚧 En curso (WIP)
 
-- [ ] [#11](https://github.com/mblasi/training/issues/11) Auth con Firebase (Google + email/password) en api, admin y mobile · feat · @mblasi
+_Nada por ahora._
 
 ## 👀 En revisión
 
-_Nada por ahora._
+- [ ] [#11](https://github.com/mblasi/training/issues/11) Auth con Firebase (Google + email/password) en api, admin y mobile · feat · @mblasi
 
 ## 📋 Pendiente
 
