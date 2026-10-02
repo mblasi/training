@@ -423,6 +423,121 @@ def is_signature_error_acceptable(error_code: str, error_line: str, test_file: s
     return False
 
 
+def build_symbol_to_impl_map(
+    test_file: str,
+    impl_files: list[str],
+    repo_root: str
+) -> dict[str, str]:
+    """
+    Build a map of local symbol names to impl_file paths.
+    
+    Parses static and dynamic destructured imports from test file.
+    Maps each imported symbol's local name to its impl_file.
+    
+    Excludes:
+    - Namespace imports (import * as x)
+    - Default imports (import x)
+    - Non-relative imports (e.g. 'vitest')
+    - Imports that don't resolve to any impl_file
+    
+    Args:
+        test_file: Test file path (relative to repo_root)
+        impl_files: List of implementation file paths (relative to repo_root)
+        repo_root: Repository root path
+    
+    Returns:
+        Dict mapping local symbol name to impl_file path
+    """
+    test_path = Path(repo_root) / test_file
+    
+    if not test_path.exists():
+        return {}
+    
+    try:
+        content = test_path.read_text(encoding="utf-8")
+    except Exception:
+        return {}
+    
+    symbol_map = {}
+    
+    # Parse static imports: import { x, y as z } from 'path'
+    # Pattern captures: (1) import specifiers (2) path
+    static_import_pattern = re.compile(
+        r"""
+        import\s+
+        \{\s*
+        ([^}]+)  # import specifiers
+        \}\s*
+        from\s+['"]([^'"]+)['"]
+        """,
+        re.VERBOSE
+    )
+    
+    for match in static_import_pattern.finditer(content):
+        specifiers_str = match.group(1)
+        import_path = match.group(2)
+        
+        # Resolve import path
+        impl_file = resolve_import_to_impl_file(test_file, import_path, impl_files, repo_root)
+        if not impl_file:
+            continue
+        
+        # Parse specifiers: 'a, b as c, d'
+        # Split by comma and handle aliases
+        for spec in specifiers_str.split(','):
+            spec = spec.strip()
+            if ' as ' in spec:
+                # Aliased import: 'original as local'
+                parts = spec.split(' as ')
+                local_name = parts[1].strip()
+            else:
+                # Direct import: 'name'
+                local_name = spec
+            
+            if local_name:
+                symbol_map[local_name] = impl_file
+    
+    # Parse dynamic imports: const { x, y as z } = await import('path')
+    # Pattern captures: (1) destructuring pattern (2) path
+    dynamic_import_pattern = re.compile(
+        r"""
+        \{\s*
+        ([^}]+)  # destructuring pattern
+        \}\s*
+        =\s*
+        (?:await\s+)?
+        import\s*\(\s*['"]([^'"]+)['"]\s*\)
+        """,
+        re.VERBOSE
+    )
+    
+    for match in dynamic_import_pattern.finditer(content):
+        destructure_str = match.group(1)
+        import_path = match.group(2)
+        
+        # Resolve import path
+        impl_file = resolve_import_to_impl_file(test_file, import_path, impl_files, repo_root)
+        if not impl_file:
+            continue
+        
+        # Parse destructuring: 'a, b: c, d'
+        # Dynamic imports use colon for renaming
+        for spec in destructure_str.split(','):
+            spec = spec.strip()
+            if ':' in spec:
+                # Renamed: 'original: local'
+                parts = spec.split(':')
+                local_name = parts[1].strip()
+            else:
+                # Direct: 'name'
+                local_name = spec
+            
+            if local_name:
+                symbol_map[local_name] = impl_file
+    
+    return symbol_map
+
+
 def get_new_lines(repo_root: str, file: str, run_cmd: Callable) -> list[str]:
     """
     Get new lines in a file.
