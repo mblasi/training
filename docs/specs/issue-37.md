@@ -74,7 +74,7 @@ Parsear imports estáticos y dinámicos desestructurados del test y construir ma
 **Progreso:**
 - [x] RED: tests escritos y fallan
 - [x] GREEN: tests pasan
-- [ ] REFACTOR: código limpio
+- [x] REFACTOR: código limpio
 
 ### T3: Clasificador de callee por balanceo de llaves/parens sobre archivo completo
 
