@@ -24,21 +24,22 @@ export function createAuthHook({ auth, db, adminEmails }: CreateAuthHookOptions)
     
     const token = authHeader.substring(7);
     
+    let decoded: Awaited<ReturnType<typeof verifyToken>>;
     try {
-      const decoded = await verifyToken(auth, token);
-      
-      if (!decoded.email || decoded.email_verified === undefined) {
-        return reply.code(401).send({ error: 'Unauthorized' });
-      }
-      
-      const user = await upsertUser(db, {
-        uid: decoded.uid,
-        email: decoded.email,
-        email_verified: decoded.email_verified,
-      }, adminEmails);
-      request.user = user;
+      decoded = await verifyToken(auth, token);
     } catch {
       return reply.code(401).send({ error: 'Unauthorized' });
     }
+
+    if (!decoded.email || decoded.email_verified === undefined) {
+      return reply.code(401).send({ error: 'Unauthorized' });
+    }
+
+    // Un error de DB aqui NO es una sesion invalida: se propaga (500).
+    request.user = await upsertUser(db, {
+      uid: decoded.uid,
+      email: decoded.email,
+      email_verified: decoded.email_verified,
+    }, adminEmails);
   };
 }

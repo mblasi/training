@@ -81,7 +81,7 @@ jobs:
         run: pnpm --filter @trainia/api db:seed
       
       - name: Run integration tests with Firebase Auth Emulator
-        run: firebase emulators:exec --only auth --project demo-trainia "pnpm --filter @trainia/api test:integration && pnpm --filter @trainia/mobile test:integration"
+        run: pnpm exec firebase emulators:exec --only auth --project demo-trainia "pnpm --filter @trainia/api test:integration && pnpm --filter @trainia/mobile test:integration"
         env:
           FIREBASE_PROJECT_ID: demo-trainia
           FIREBASE_AUTH_EMULATOR_HOST: 127.0.0.1:9099

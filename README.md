@@ -105,14 +105,14 @@ Las apps usan Firebase Auth para autenticación. Variables de entorno necesarias
 
 **Tests de integración:**
 
-Los tests de integración de auth requieren el Firebase Auth Emulator. En CI esto se maneja automáticamente con `firebase emulators:exec`. Para desarrollo local:
+Los tests de integración de auth requieren el Firebase Auth Emulator. En CI esto se maneja automáticamente con `pnpm exec firebase emulators:exec`. Para desarrollo local:
 
 ```bash
 # Instalar firebase-tools si no está
 pnpm install
 
 # Correr tests de integración con emulador
-firebase emulators:exec --only auth --project demo-trainia "pnpm --filter @trainia/api test:integration && pnpm --filter @trainia/mobile test:integration"
+pnpm exec firebase emulators:exec --only auth --project demo-trainia "pnpm --filter @trainia/api test:integration && pnpm --filter @trainia/mobile test:integration"
 ```
 
 ## Flujo de trabajo

@@ -40,7 +40,6 @@ export async function upsertUser(
       set: {
         email,
         role,
-        locale: 'es',
       },
     })
     .returning();

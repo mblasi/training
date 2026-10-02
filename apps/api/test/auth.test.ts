@@ -223,6 +223,20 @@ describe('upsertUser', () => {
     expect(calls2[1].row.role).toBe('user');
     expect(calls2[1].set.role).toBe('user');
   });
+  test('test_upsertUser_does_not_overwrite_locale_on_conflict', async () => {
+    const fakeDb = createFakeDb();
+
+    await upsertUser(
+      fakeDb as never,
+      { uid: 'u6', email: 'someone@x.com', email_verified: true },
+      []
+    );
+
+    const calls = fakeDb.getCalls();
+    expect(calls).toHaveLength(1);
+    expect(Object.keys(calls[0].set).sort()).toEqual(['email', 'role']);
+    expect(calls[0].row.locale).toBe('es');
+  });
 });
 
 describe('auth plugin', () => {
@@ -383,5 +397,64 @@ describe('auth plugin', () => {
 
     const body = JSON.parse(response.body);
     expect(body).toEqual({ ok: true });
+  });
+
+  test('test_auth_plugin_returns_500_not_401_when_db_fails', async () => {
+    const failingDb = {
+      insert: () => {
+        throw new Error('connection refused');
+      },
+    };
+    const fakePool = { query: vi.fn() } as never;
+    const mockAuth = {
+      verifyIdToken: vi.fn().mockResolvedValue({
+        uid: 'u500',
+        email: 'user@test.com',
+        email_verified: true,
+      }),
+    };
+
+    const { buildApp } = await import('../src/app.js');
+    const app = buildApp({
+      db: { pool: fakePool, db: failingDb as never },
+      auth: mockAuth,
+      adminEmails: [],
+    });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/me',
+      headers: {
+        authorization: 'Bearer valid-token',
+      },
+    });
+
+    expect(response.statusCode).not.toBe(401);
+    expect(response.statusCode).toBe(500);
+  });
+
+  test('test_auth_plugin_returns_401_when_verifyIdToken_rejects', async () => {
+    const fakeDb = createFakeDb();
+    const fakePool = { query: vi.fn() } as never;
+    const mockAuth = {
+      verifyIdToken: vi.fn().mockRejectedValue(new Error('expired')),
+    };
+
+    const { buildApp } = await import('../src/app.js');
+    const app = buildApp({
+      db: { pool: fakePool, db: fakeDb as never },
+      auth: mockAuth,
+      adminEmails: [],
+    });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/me',
+      headers: {
+        authorization: 'Bearer expired-token',
+      },
+    });
+
+    expect(response.statusCode).toBe(401);
   });
 });

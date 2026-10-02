@@ -293,6 +293,19 @@ class TestIssue11Task8(unittest.TestCase):
             "ci.yml debe contener '@trainia/mobile test:integration'"
         )
 
+    def test_ci_emulators_exec_runs_via_pnpm_exec(self):
+        """La línea de ci.yml con emulators:exec arranca con 'pnpm exec firebase' (firebase no está en PATH)."""
+        with open(self.ci_yml, 'r') as f:
+            lines = [l.strip() for l in f.read().split('\n') if 'emulators:exec' in l]
+
+        self.assertTrue(lines, "ci.yml debe contener una línea con 'emulators:exec'")
+        for line in lines:
+            command = line.split('run:', 1)[1].strip() if 'run:' in line else line
+            self.assertTrue(
+                command.startswith('pnpm exec firebase'),
+                f"El comando debe empezar con 'pnpm exec firebase': {line}"
+            )
+
     def test_ci_integration_step_has_firebase_project_id_env(self):
         """El step de emulators:exec en ci.yml tiene env FIREBASE_PROJECT_ID=demo-trainia."""
         self.assertTrue(
