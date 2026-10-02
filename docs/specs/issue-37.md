@@ -48,7 +48,7 @@ Definir CastCheckResult frozen dataclass y extraer resolve_import_to_impl_file d
 - `scripts/tdd_runner.py`
 
 **Progreso:**
-- [ ] RED: tests escritos y fallan
+- [x] RED: tests escritos y fallan
 - [ ] GREEN: tests pasan
 - [ ] REFACTOR: código limpio
 
