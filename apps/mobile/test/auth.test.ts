@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import type { Auth, AuthCredential } from 'firebase/auth';
+import type { Auth, OAuthCredential } from 'firebase/auth';
 
 vi.mock('firebase/app', () => ({
   initializeApp: vi.fn(() => ({}))
@@ -33,6 +33,21 @@ vi.mock('@react-native-async-storage/async-storage', () => ({
   }
 }));
 
+async function fakeOAuthCredential(idToken: string): Promise<OAuthCredential> {
+  // OAuthCredential has private members, so an object literal cannot satisfy it;
+  // build a real instance with the actual (unmocked) firebase/auth module.
+  const actual = await vi.importActual<typeof import('firebase/auth')>('firebase/auth');
+  const credential = actual.OAuthCredential.fromJSON({
+    providerId: 'google.com',
+    signInMethod: 'google.com',
+    idToken
+  });
+  if (!credential) {
+    throw new Error('failed to build OAuthCredential');
+  }
+  return credential;
+}
+
 describe('mobile auth', () => {
   const mockAuth = {} as Auth;
 
@@ -62,13 +77,20 @@ describe('mobile auth', () => {
       const { GoogleAuthProvider, signInWithCredential } = await import('firebase/auth');
       
       const idToken = 'mock-id-token';
-      const mockCredential = { providerId: 'google.com', token: idToken } as AuthCredential;
+      const mockCredential = await fakeOAuthCredential(idToken);
       
-      const signInResult = {
-        type: 'success' as const,
+      const signInResult: Awaited<ReturnType<typeof GoogleSignin.signIn>> = {
+        type: 'success',
         data: {
           idToken,
-          user: { id: '123', email: 'test@example.com', name: 'Test User' },
+          user: {
+            id: '123',
+            name: 'Test User',
+            email: 'test@example.com',
+            photo: null,
+            familyName: null,
+            givenName: null
+          },
           scopes: [],
           serverAuthCode: null
         }
