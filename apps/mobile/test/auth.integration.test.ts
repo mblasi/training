@@ -1,12 +1,19 @@
 import { describe, test, expect, beforeAll } from 'vitest';
 import { initializeApp } from 'firebase/app';
-import { getAuth, signInWithEmailAndPassword, connectAuthEmulator } from 'firebase/auth';
-import { signInWithEmail } from '../src/auth/index.js';
+import {
+  getAuth,
+  connectAuthEmulator,
+  createUserWithEmailAndPassword,
+  signOut,
+} from 'firebase/auth';
+import { signInWithEmail } from '../src/auth/email.js';
 
 describe('Auth integration with emulator', () => {
   let auth: ReturnType<typeof getAuth>;
+  const email = `user-${Date.now()}@example.com`;
+  const password = 'password123';
 
-  beforeAll(() => {
+  beforeAll(async () => {
     if (!process.env.EXPO_PUBLIC_FIREBASE_AUTH_EMULATOR_HOST) {
       throw new Error(
         'EXPO_PUBLIC_FIREBASE_AUTH_EMULATOR_HOST not set. Integration tests require Firebase Auth emulator.'
@@ -19,22 +26,19 @@ describe('Auth integration with emulator', () => {
     });
     auth = getAuth(app);
     connectAuthEmulator(auth, `http://${process.env.EXPO_PUBLIC_FIREBASE_AUTH_EMULATOR_HOST}`);
+
+    // The emulator does not auto-create users on sign in: create it explicitly
+    await createUserWithEmailAndPassword(auth, email, password);
+    await signOut(auth);
   });
 
   test('signInWithEmail succeeds with correct credentials', async () => {
-    const email = 'test@example.com';
-    const password = 'password123';
-
-    // signInWithEmailAndPassword auto-creates users in the emulator
-    await signInWithEmailAndPassword(auth, email, password);
-
     const result = await signInWithEmail(auth, email, password);
     expect(result.user).toBeDefined();
     expect(result.user.email).toBe(email);
   });
 
   test('signInWithEmail fails with wrong password', async () => {
-    const email = 'test@example.com';
     const wrongPassword = 'wrongpassword';
 
     await expect(

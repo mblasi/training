@@ -4,11 +4,33 @@ import { getAuth } from 'firebase-admin/auth';
 import { createDb } from '../src/db/client.js';
 import { buildApp } from '../src/app.js';
 
+async function exchangeCustomTokenForIdToken(customToken: string): Promise<string> {
+  const response = await fetch(
+    `http://${process.env.FIREBASE_AUTH_EMULATOR_HOST}/identitytoolkit.googleapis.com/v1/accounts:signInWithCustomToken?key=fake-api-key`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ token: customToken, returnSecureToken: true }),
+    }
+  );
+  if (!response.ok) {
+    throw new Error(
+      `signInWithCustomToken failed: ${response.status} ${await response.text()}`
+    );
+  }
+  const body = (await response.json()) as { idToken?: unknown };
+  if (typeof body.idToken !== 'string') {
+    throw new Error('signInWithCustomToken response has no string idToken');
+  }
+  return body.idToken;
+}
+
 describe('Auth integration with emulator', () => {
   let db: ReturnType<typeof createDb> | undefined;
   let app: ReturnType<typeof buildApp> | undefined;
-  let testUserToken: string;
-  let adminUserToken: string;
+  let testUserIdToken: string;
+  let adminUserIdToken: string;
+  const testEmail = `user-${Date.now()}@example.com`;
 
   beforeAll(async () => {
     const databaseUrl = process.env.DATABASE_URL;
@@ -39,18 +61,29 @@ describe('Auth integration with emulator', () => {
       adminEmails: ['admin@test.local'],
     });
 
-    // Create test users and get tokens
+    // Create test users and get real ID tokens
     const testUser = await auth.createUser({
-      email: 'test@example.com',
+      email: testEmail,
       emailVerified: true,
     });
-    testUserToken = await auth.createCustomToken(testUser.uid);
+    testUserIdToken = await exchangeCustomTokenForIdToken(
+      await auth.createCustomToken(testUser.uid)
+    );
 
-    const adminUser = await auth.createUser({
-      email: 'admin@test.local',
-      emailVerified: true,
-    });
-    adminUserToken = await auth.createCustomToken(adminUser.uid);
+    let adminUser;
+    try {
+      adminUser = await auth.createUser({
+        email: 'admin@test.local',
+        emailVerified: true,
+      });
+    } catch (error) {
+      const code = (error as { code?: unknown }).code;
+      if (code !== 'auth/email-already-exists') throw error;
+      adminUser = await auth.getUserByEmail('admin@test.local');
+    }
+    adminUserIdToken = await exchangeCustomTokenForIdToken(
+      await auth.createCustomToken(adminUser.uid)
+    );
   });
 
   afterAll(async () => {
@@ -77,13 +110,13 @@ describe('Auth integration with emulator', () => {
       method: 'GET',
       url: '/me',
       headers: {
-        authorization: `Bearer ${testUserToken}`,
+        authorization: `Bearer ${testUserIdToken}`,
       },
     });
 
     expect(response.statusCode).toBe(200);
     const body = JSON.parse(response.body);
-    expect(body.email).toBe('test@example.com');
+    expect(body.email).toBe(testEmail);
     expect(body.role).toBe('user');
   });
 
@@ -94,7 +127,7 @@ describe('Auth integration with emulator', () => {
       method: 'GET',
       url: '/admin/ping',
       headers: {
-        authorization: `Bearer ${testUserToken}`,
+        authorization: `Bearer ${testUserIdToken}`,
       },
     });
 
@@ -108,7 +141,7 @@ describe('Auth integration with emulator', () => {
       method: 'GET',
       url: '/admin/ping',
       headers: {
-        authorization: `Bearer ${adminUserToken}`,
+        authorization: `Bearer ${adminUserIdToken}`,
       },
     });
 
