@@ -99,7 +99,7 @@ Implementar el algoritmo de balanceo que dado un archivo y la línea disparadora
 **Progreso:**
 - [x] RED: tests escritos y fallan
 - [x] GREEN: tests pasan
-- [ ] REFACTOR: código limpio
+- [x] REFACTOR: código limpio
 
 ### T4: detect_full_arg_cast nueva firma + CastCheckResult + actualizar run_red_phase + migrar tests #35 y #35-revert
 
