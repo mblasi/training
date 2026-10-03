@@ -56,6 +56,30 @@ MAX_DESVIOS_PER_PHASE = 3
 # Sentinel value to signal back-to-RED from GREEN
 BACK_TO_RED = "back_to_red"
 
+# Known external callees (test framework functions and matchers).
+# This is the explicit boundary between "known external" and "suspicious".
+# Entries are the LAST SEGMENT of the callee (e.g., "mockResolvedValue" matches "vi.mocked(foo).mockResolvedValue").
+# When a callee's last segment is in this set, it's accepted without warning.
+# To add new entries, update this set AND document in AGENTS.md.
+KNOWN_EXTERNAL_CALLEES = frozenset({
+    "mockResolvedValue",
+    "mockResolvedValueOnce",
+    "mockRejectedValue",
+    "mockRejectedValueOnce",
+    "mockReturnValue",
+    "mockReturnValueOnce",
+    "mockImplementation",
+    "mockImplementationOnce",
+    "toEqual",
+    "toStrictEqual",
+    "toBe",
+    "toMatchObject",
+    "toHaveBeenCalledWith",
+    "toHaveBeenLastCalledWith",
+    "spyOn",
+    "mocked",
+})
+
 
 def is_dependency_infra_file(path: str) -> bool:
     """
@@ -85,6 +109,203 @@ def is_dependency_infra_file(path: str) -> bool:
         return True
     
     return False
+
+
+def classify_callee(
+    file_path: str,
+    trigger_line: str,
+    symbol_map: dict[str, str],
+    repo_root: str
+) -> CastCheckResult:
+    """
+    Classify a cast by balancing braces/parens and checking the callee.
+    
+    Reads the file, finds trigger_line, balances backwards from the closing brace
+    to determine if the cast object is a function argument, and classifies the callee.
+    
+    Classification rules (in order):
+    1. Callee in symbol_map (imported from impl_file) → REJECT
+    2. Last segment of callee in KNOWN_EXTERNAL_CALLEES → ACCEPT (no warning)
+    3. Callee not resolvable → ACCEPT with warning
+    
+    Non-argument contexts (=, :, return, )) are always accepted without warning.
+    Unbalanced braces → ACCEPT with warning.
+    
+    Args:
+        file_path: Test file path (relative to repo_root)
+        trigger_line: The line containing the cast pattern
+        symbol_map: Map of symbol → impl_file (from build_symbol_to_impl_map)
+        repo_root: Absolute path to repository root
+    
+    Returns:
+        CastCheckResult with rejected line (if any) and warnings
+    """
+    abs_path = Path(repo_root) / file_path
+    if not abs_path.exists():
+        return CastCheckResult(
+            rejected=None,
+            warnings=(f"File not found: {file_path}",)
+        )
+    
+    content = abs_path.read_text()
+    lines = content.splitlines(keepends=True)
+    
+    # Find the trigger line
+    trigger_idx = None
+    for i, line in enumerate(lines):
+        if line.rstrip() == trigger_line.rstrip():
+            trigger_idx = i
+            break
+    
+    if trigger_idx is None:
+        return CastCheckResult(
+            rejected=None,
+            warnings=(f"Trigger line not found in {file_path}",)
+        )
+    
+    # Balance backwards from the closing brace
+    # The trigger line contains "} as <kw>..." - find the matching opening brace
+    full_text = ''.join(lines)
+    
+    # Find position of trigger line in full text
+    trigger_pos = sum(len(lines[j]) for j in range(trigger_idx))
+    trigger_end = trigger_pos + len(lines[trigger_idx])
+    
+    # Find the "} as" in the trigger line
+    trigger_content = lines[trigger_idx]
+    closing_brace_match = re.search(r'\}\s+as\s+', trigger_content)
+    if not closing_brace_match:
+        return CastCheckResult(
+            rejected=None,
+            warnings=(f"No '}} as' pattern in trigger line: {file_path}:{trigger_idx+1}",)
+        )
+    
+    # Position of the closing } in full text
+    closing_brace_pos = trigger_pos + closing_brace_match.start()
+    
+    # Balance backwards to find matching opening brace
+    # We need to balance both {} and () to detect context violations
+    brace_balance = 1  # We start at the closing brace
+    paren_balance = 0
+    pos = closing_brace_pos - 1
+    
+    while pos >= 0 and brace_balance > 0:
+        char = full_text[pos]
+        if char == '}':
+            brace_balance += 1
+        elif char == '{':
+            brace_balance -= 1
+        elif char == ')':
+            paren_balance += 1
+        elif char == '(':
+            paren_balance -= 1
+        pos -= 1
+    
+    if brace_balance != 0:
+        # Unbalanced braces
+        return CastCheckResult(
+            rejected=None,
+            warnings=(f"Unbalanced braces in {file_path}:{trigger_idx+1}",)
+        )
+    
+    # Check if parentheses are unbalanced at the point where braces balanced
+    # If paren_balance > 0, we crossed an unmatched closing paren
+    # If paren_balance < 0, we're inside an unclosed opening paren
+    if paren_balance != 0:
+        return CastCheckResult(
+            rejected=None,
+            warnings=(f"Unbalanced braces in {file_path}:{trigger_idx+1}",)
+        )
+    
+    # pos is now one position before the opening brace
+    opening_brace_pos = pos + 1
+    
+    # Check the character immediately before the opening brace
+    if opening_brace_pos > 0:
+        prev_char_pos = opening_brace_pos - 1
+        # Skip whitespace backwards
+        while prev_char_pos >= 0 and full_text[prev_char_pos].isspace():
+            prev_char_pos -= 1
+        
+        if prev_char_pos >= 0:
+            prev_char = full_text[prev_char_pos]
+            
+            # Check for non-argument contexts
+            if prev_char in ('=', ':', ')'):
+                # Not a function argument - accept without warning
+                return CastCheckResult(rejected=None, warnings=())
+            
+            # Check for 'return' keyword
+            # Look backwards for the word 'return'
+            word_end = prev_char_pos
+            while word_end >= 0 and full_text[word_end].isspace():
+                word_end -= 1
+            word_start = word_end
+            while word_start >= 0 and (full_text[word_start].isalnum() or full_text[word_start] == '_'):
+                word_start -= 1
+            word = full_text[word_start+1:word_end+1]
+            if word == 'return':
+                # Return statement - accept without warning
+                return CastCheckResult(rejected=None, warnings=())
+            
+            # It's an opening paren '(' - this is a function call
+            if prev_char == '(':
+                # Extract callee: walk backwards from the opening paren
+                # Skip whitespace
+                callee_end = prev_char_pos - 1
+                while callee_end >= 0 and full_text[callee_end].isspace():
+                    callee_end -= 1
+                
+                # Walk backwards to find the start of the callee
+                # Callee can be: identifier, dotted.path, or chained().calls()
+                callee_start = callee_end
+                paren_depth = 0
+                while callee_start >= 0:
+                    c = full_text[callee_start]
+                    if c == ')':
+                        paren_depth += 1
+                        callee_start -= 1
+                    elif c == '(':
+                        paren_depth -= 1
+                        callee_start -= 1
+                    elif c.isalnum() or c in ('_', '.', '$'):
+                        callee_start -= 1
+                    elif paren_depth > 0:
+                        # Inside parens, keep going
+                        callee_start -= 1
+                    else:
+                        # Hit a non-identifier character
+                        break
+                
+                callee = full_text[callee_start+1:callee_end+1].strip()
+                
+                if not callee:
+                    return CastCheckResult(
+                        rejected=None,
+                        warnings=(f"Could not extract callee from {file_path}:{trigger_idx+1}",)
+                    )
+                
+                # Classify the callee
+                # Rule 1: Check if callee is in symbol_map
+                if callee in symbol_map:
+                    return CastCheckResult(rejected=trigger_line.rstrip(), warnings=())
+                
+                # Rule 2: Check if last segment is in KNOWN_EXTERNAL_CALLEES
+                last_segment = callee.split('.')[-1]
+                if last_segment in KNOWN_EXTERNAL_CALLEES:
+                    return CastCheckResult(rejected=None, warnings=())
+                
+                # Rule 3: Callee not resolvable - accept with warning
+                return CastCheckResult(
+                    rejected=None,
+                    warnings=(
+                        f"Callee '{callee}' not resolvable in {file_path}:{trigger_idx+1} "
+                        f"(not in symbol map and not a known external function)",
+                    )
+                )
+    
+    # Default: accept without warning
+    return CastCheckResult(rejected=None, warnings=())
 
 
 def extract_ts_error_type_name(error_code: str, error_message: str) -> str | None:
