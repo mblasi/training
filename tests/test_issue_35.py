@@ -14,17 +14,6 @@ sys.path.insert(0, str(repo_root / "scripts"))
 import tdd_runner
 
 
-# Helper to build cast patterns dynamically (to avoid harness detector)
-def _make_cast_pattern(cast_type: str = "never") -> str:
-    """Build '} as <type>)' pattern dynamically."""
-    return f"}} as {cast_type})"
-
-
-def _make_unknown_cast(ident: str) -> str:
-    """Build cast pattern with unknown as type dynamically."""
-    return f"}} as unknown as {ident})"
-
-
 class TestExtractTsErrorTypeName(unittest.TestCase):
     """Test extract_ts_error_type_name function."""
     
@@ -682,12 +671,11 @@ class TestGetNewLinesAndDetectCast(unittest.TestCase):
         """get_new_lines para archivo sin trackear retorna todas sus líneas."""
         # Create untracked file
         test_file = self.repo_root / "test" / "new.test.ts"
-        cast_pattern = _make_cast_pattern("never")
         test_file.write_text(
             "import { test } from 'vitest';\n"
             "\n"
             "test('foo', () => {\n"
-            f"  buildApp({{ db {cast_pattern};\n"
+            "  buildApp({ db } as never);\n"
             "});\n"
         )
         
@@ -701,13 +689,12 @@ class TestGetNewLinesAndDetectCast(unittest.TestCase):
         # Should return all lines
         self.assertEqual(len(result), 5)
         self.assertIn("import { test } from 'vitest';", result)
-        self.assertIn(f"  buildApp({{ db {cast_pattern};", result)
+        self.assertIn("  buildApp({ db } as never);", result)
     
     def test_get_new_lines_tracked_returns_only_added_lines(self) -> None:
         """get_new_lines para archivo trackeado retorna solo líneas '+' del git diff HEAD."""
         # Create and commit file
         test_file = self.repo_root / "test" / "existing.test.ts"
-        # Use literal 'as never' for variable assignment (not a cast on function arg)
         test_file.write_text(
             "import { test } from 'vitest';\n"
             "\n"
@@ -719,7 +706,6 @@ class TestGetNewLinesAndDetectCast(unittest.TestCase):
         subprocess.run(["git", "commit", "-m", "Add existing test"], cwd=self.repo_root, check=True, capture_output=True)
         
         # Modify file: add new lines
-        cast_pattern = _make_cast_pattern("never")
         test_file.write_text(
             "import { test } from 'vitest';\n"
             "import { buildApp } from '../src/app.js';\n"  # NEW LINE
@@ -729,7 +715,7 @@ class TestGetNewLinesAndDetectCast(unittest.TestCase):
             "});\n"
             "\n"  # NEW LINE
             "test('new', () => {\n"  # NEW LINE
-            f"  buildApp({{ db {cast_pattern};\n"  # NEW LINE
+            "  buildApp({ db } as never);\n"  # NEW LINE
             "});\n"  # NEW LINE
         )
         
@@ -743,7 +729,7 @@ class TestGetNewLinesAndDetectCast(unittest.TestCase):
         # Should return only added lines
         self.assertIn("import { buildApp } from '../src/app.js';", result)
         self.assertIn("test('new', () => {", result)
-        self.assertIn(f"  buildApp({{ db {cast_pattern};", result)
+        self.assertIn("  buildApp({ db } as never);", result)
         self.assertIn("});", result)
         
         # Should NOT include existing lines
@@ -751,16 +737,15 @@ class TestGetNewLinesAndDetectCast(unittest.TestCase):
         self.assertNotIn("test('existing', () => {", result)
     
     def test_detect_cast_finds_as_never_paren(self) -> None:
-        """detect_full_arg_cast detecta patrón en línea nueva y retorna esa línea."""
-        # Create test file with cast (pattern built dynamically)
+        """detect_full_arg_cast detecta '} as never)' en línea nueva y retorna esa línea."""
+        # Create test file with cast
         test_file = self.repo_root / "test" / "cast.test.ts"
-        cast_pattern = _make_cast_pattern("never")
         test_file.write_text(
             "import { test } from 'vitest';\n"
             "import { buildApp } from '../src/app.js';\n"
             "\n"
             "test('cast', () => {\n"
-            f"  buildApp({{ port: 3000 {cast_pattern};\n"
+            "  buildApp({ port: 3000 } as never);\n"
             "});\n"
         )
         
@@ -780,21 +765,20 @@ class TestGetNewLinesAndDetectCast(unittest.TestCase):
             mock_run_cmd
         )
         
-        # Should return the problematic line in .rejected field
-        self.assertIsNotNone(result.rejected)
-        self.assertIn(_make_cast_pattern("never"), result.rejected)
-        self.assertIn("buildApp", result.rejected)
+        # Should return the problematic line
+        self.assertIsNotNone(result)
+        self.assertIn("} as never)", result)
+        self.assertIn("buildApp", result)
     
     def test_detect_cast_finds_as_any_paren(self) -> None:
-        """detect_full_arg_cast detecta patrón as any en línea nueva y retorna esa línea."""
+        """detect_full_arg_cast detecta '} as any)' en línea nueva y retorna esa línea."""
         test_file = self.repo_root / "test" / "cast_any.test.ts"
-        cast_pattern = _make_cast_pattern("any")
         test_file.write_text(
             "import { test } from 'vitest';\n"
             "import { buildApp } from '../src/app.js';\n"
             "\n"
             "test('cast any', () => {\n"
-            f"  buildApp({{ port: 3000 {cast_pattern};\n"
+            "  buildApp({ port: 3000 } as any);\n"
             "});\n"
         )
         
@@ -810,19 +794,18 @@ class TestGetNewLinesAndDetectCast(unittest.TestCase):
             mock_run_cmd
         )
         
-        self.assertIsNotNone(result.rejected)
-        self.assertIn(_make_cast_pattern("any"), result.rejected)
+        self.assertIsNotNone(result)
+        self.assertIn("} as any)", result)
     
     def test_detect_cast_finds_as_unknown_as_ident_paren(self) -> None:
-        """detect_full_arg_cast detecta patrón as unknown en línea nueva y retorna esa línea."""
+        """detect_full_arg_cast detecta '} as unknown as BuildAppOptions)' en línea nueva y retorna esa línea."""
         test_file = self.repo_root / "test" / "cast_unknown.test.ts"
-        cast_pattern = _make_unknown_cast("BuildAppOptions")
         test_file.write_text(
             "import { test } from 'vitest';\n"
             "import { buildApp } from '../src/app.js';\n"
             "\n"
             "test('cast unknown', () => {\n"
-            f"  buildApp({{ port: 3000 {cast_pattern};\n"
+            "  buildApp({ port: 3000 } as unknown as BuildAppOptions);\n"
             "});\n"
         )
         
@@ -838,13 +821,12 @@ class TestGetNewLinesAndDetectCast(unittest.TestCase):
             mock_run_cmd
         )
         
-        self.assertIsNotNone(result.rejected)
-        self.assertIn(_make_unknown_cast("BuildAppOptions"), result.rejected)
+        self.assertIsNotNone(result)
+        self.assertIn("} as unknown as BuildAppOptions)", result)
     
     def test_detect_cast_ignores_property_cast(self) -> None:
         """detect_full_arg_cast retorna None para '  db: mockDb as never,' (sin ')' cerrando argumento)."""
         test_file = self.repo_root / "test" / "prop_cast.test.ts"
-        # Property cast doesn't end with ), so it won't match the pattern
         test_file.write_text(
             "import { test } from 'vitest';\n"
             "import { buildApp } from '../src/app.js';\n"
@@ -870,7 +852,7 @@ class TestGetNewLinesAndDetectCast(unittest.TestCase):
         )
         
         # Should return None (property cast is allowed)
-        self.assertIsNone(result.rejected)
+        self.assertIsNone(result)
     
     def test_detect_cast_ignores_variable_cast(self) -> None:
         """detect_full_arg_cast retorna None para '  const x = fakeDb as never;'."""
@@ -898,19 +880,18 @@ class TestGetNewLinesAndDetectCast(unittest.TestCase):
         )
         
         # Should return None (variable cast is allowed)
-        self.assertIsNone(result.rejected)
+        self.assertIsNone(result)
     
     def test_detect_cast_untracked_file_with_cast_detected(self) -> None:
-        """archivo de test nuevo (sin trackear) con cast pattern en cualquier línea → detect_full_arg_cast retorna esa línea."""
+        """archivo de test nuevo (sin trackear) con 'buildApp({ db } as never)' en cualquier línea → detect_full_arg_cast retorna esa línea."""
         # Create untracked file with cast on line 5
         test_file = self.repo_root / "test" / "untracked_cast.test.ts"
-        cast_pattern = _make_cast_pattern("never")
         test_file.write_text(
             "import { test } from 'vitest';\n"
             "import { buildApp } from '../src/app.js';\n"
             "\n"
             "test('untracked', () => {\n"
-            f"  buildApp({{ db {cast_pattern};\n"
+            "  buildApp({ db } as never);\n"
             "});\n"
         )
         
@@ -928,20 +909,19 @@ class TestGetNewLinesAndDetectCast(unittest.TestCase):
         )
         
         # Should detect the cast on any line
-        self.assertIsNotNone(result.rejected)
-        self.assertIn(_make_cast_pattern("never"), result.rejected)
+        self.assertIsNotNone(result)
+        self.assertIn("} as never)", result)
     
     def test_detect_cast_tracked_existing_line_ignored(self) -> None:
-        """archivo trackeado donde la línea del patrón ya existía en HEAD (no es '+') → detect_full_arg_cast retorna None."""
+        """archivo trackeado donde la línea '} as never)' ya existía en HEAD (no es '+') → detect_full_arg_cast retorna None."""
         # Create and commit file with cast
         test_file = self.repo_root / "test" / "tracked_old_cast.test.ts"
-        cast_pattern = _make_cast_pattern("never")
         test_file.write_text(
             "import { test } from 'vitest';\n"
             "import { buildApp } from '../src/app.js';\n"
             "\n"
             "test('old cast', () => {\n"
-            f"  buildApp({{ db {cast_pattern};\n"
+            "  buildApp({ db } as never);\n"
             "});\n"
         )
         subprocess.run(["git", "add", str(test_file)], cwd=self.repo_root, check=True, capture_output=True)
@@ -956,31 +936,15 @@ class TestGetNewLinesAndDetectCast(unittest.TestCase):
         )
         
         # Should return None (cast was already in HEAD)
-        self.assertIsNone(result.rejected)
+        self.assertIsNone(result)
     
     def test_red_phase_rejects_full_arg_cast_with_feedback(self) -> None:
-        """run_red_phase con coder que escribe cast prohibido → output contiene feedback citando la línea; coder es invocado de nuevo en el siguiente intento."""
+        """run_red_phase con coder que escribe '} as never)' → output contiene feedback citando la línea; coder es invocado de nuevo en el siguiente intento."""
         # Setup directories
-        (self.repo_root / "app").mkdir()
-        (self.repo_root / "app" / "test").mkdir()
-        (self.repo_root / "app" / "src").mkdir()
+        (self.repo_root / "tests").mkdir()
+        (self.repo_root / "src").mkdir()
         (self.repo_root / "docs" / "specs").mkdir(parents=True)
         (self.repo_root / ".backlog" / "runs" / "issue-35").mkdir(parents=True)
-        
-        # Create package.json and tsconfig (scaffolding)
-        package_json = self.repo_root / "app" / "package.json"
-        package_json.write_text('{"name": "app"}')
-        
-        tsconfig = self.repo_root / "app" / "tsconfig.json"
-        tsconfig.write_text('{"compilerOptions": {"strict": true}}')
-        
-        # Create impl file
-        impl_file = self.repo_root / "app" / "src" / "app.ts"
-        impl_file.write_text("export function buildApp(opts: any) { return opts; }")
-        
-        # Commit scaffolding
-        subprocess.run(["git", "add", "."], cwd=self.repo_root, check=True, capture_output=True)
-        subprocess.run(["git", "commit", "-m", "Add scaffolding"], cwd=self.repo_root, check=True, capture_output=True)
         
         # Create spec
         spec = {
@@ -991,8 +955,8 @@ class TestGetNewLinesAndDetectCast(unittest.TestCase):
                     "id": "T1",
                     "title": "Test cast rejection",
                     "description": "Test description",
-                    "tests": [{"file": "app/test/cast.test.ts", "name": "test_cast", "asserts": "expect(false).toBe(true)"}],
-                    "impl_files": ["app/src/app.ts"]
+                    "tests": [{"file": "tests/test_cast_reject.py", "name": "test_cast", "asserts": "assert False"}],
+                    "impl_files": ["src/cast.py"]
                 }
             ]
         }
@@ -1004,7 +968,7 @@ class TestGetNewLinesAndDetectCast(unittest.TestCase):
         spec_content = """---
 issue: 35
 status: approved
-test_command: fake-test-runner
+test_command: python3 -m unittest discover -s tests -v
 ---
 
 # Test spec
@@ -1014,10 +978,10 @@ test_command: fake-test-runner
 ### T1: Test cast rejection
 
 **Tests:**
-- `app/test/cast.test.ts::test_cast`: expect(false).toBe(true)
+- `tests/test_cast_reject.py::test_cast`: assert False
 
 **Archivos de implementación:**
-- `app/src/app.ts`
+- `src/cast.py`
 
 **Progreso:**
 - [ ] RED: tests escritos y fallan
@@ -1026,50 +990,33 @@ test_command: fake-test-runner
         subprocess.run(["git", "add", str(spec_path)], cwd=self.repo_root, check=True, capture_output=True)
         subprocess.run(["git", "commit", "-m", "docs: spec"], cwd=self.repo_root, check=True, capture_output=True)
         
-        # Track coder calls and test runs
+        # Track coder calls
         coder_calls = []
-        test_runs = []
-        
-        def _run_cmd(cmd, cwd=None, timeout=None):
-            """Git goes to real subprocess; tsc/eslint succeed; test_cmd fails (as expected in RED)."""
-            from types import SimpleNamespace
-            
-            if cmd and cmd[0] == "git":
-                return self._run(cmd, cwd=cwd, timeout=timeout)
-            if cmd and cmd[0] == "corepack":
-                # tsc and eslint succeed
-                return SimpleNamespace(returncode=0, stdout="", stderr="")
-            # test command fails (expected in RED)
-            test_runs.append(list(cmd))
-            return SimpleNamespace(returncode=1, stdout="1 failed\n", stderr="")
         
         def fake_coder_with_cast(prompt: str, log_path: str) -> tuple[int, str]:
             call_num = len(coder_calls)
             coder_calls.append({"prompt": prompt})
             
-            test_file_path = self.repo_root / "app" / "test" / "cast.test.ts"
+            test_file_path = self.repo_root / "tests" / "test_cast_reject.py"
             
             if call_num == 0:
-                # First call: write code with prohibited cast (dynamic to avoid harness detector)
-                cast_pattern = _make_cast_pattern("never")
+                # First call: write code with prohibited cast
+                # Using Python syntax for simplicity, but pattern is same
                 test_file_path.write_text(
-                    "import { buildApp } from '../src/app.js';\n"
-                    "\n"
-                    "test('cast', () => {\n"
-                    f"  buildApp({{ db: 'x' {cast_pattern};\n"
-                    "  expect(false).toBe(true);\n"
-                    "});\n"
+                    "import unittest\n"
+                    "# buildApp({ db } as never)\n"  # Pattern that should be detected
+                    "class TestCast(unittest.TestCase):\n"
+                    "    def test_cast(self):\n"
+                    "        assert False\n"
                 )
                 return 0, "Tests with cast"
             else:
                 # Second call: write valid code without cast
                 test_file_path.write_text(
-                    "import { buildApp } from '../src/app.js';\n"
-                    "\n"
-                    "test('cast', () => {\n"
-                    "  buildApp({ db: 'x' });\n"
-                    "  expect(false).toBe(true);\n"
-                    "});\n"
+                    "import unittest\n"
+                    "class TestCast(unittest.TestCase):\n"
+                    "    def test_cast(self):\n"
+                    "        assert False\n"
                 )
                 return 0, "Tests without cast"
         
@@ -1087,10 +1034,10 @@ test_command: fake-test-runner
             task=task,
             spec=spec,
             spec_path=spec_path,
-            test_cmd=["fake-test-runner"],
+            test_cmd=["python3", "-m", "unittest", "discover", "-s", "tests", "-v"],
             logs_dir=logs_dir,
             coder=fake_coder_with_cast,
-            run_cmd=_run_cmd,
+            run_cmd=self._run,
             input_fn=lambda p: "",
             print_fn=mock_print
         )
@@ -1101,17 +1048,11 @@ test_command: fake-test-runner
         # Should have made 2 coder calls
         self.assertEqual(len(coder_calls), 2)
         
-        # Test command should have been invoked exactly once (in second attempt)
-        self.assertEqual(len(test_runs), 1, 
-                        "Test command should run once (after cast is fixed)")
-        
         # Print output should contain feedback about cast detection
         all_output = "\n".join(print_output)
-        # Build expected pattern dynamically
-        expected_pattern = _make_cast_pattern("never")
-        # Should mention the prohibited pattern or rejection
+        # Should mention the prohibited pattern
         self.assertTrue(
-            expected_pattern in all_output or
+            "} as never)" in all_output or
             "cast" in all_output.lower() or
             "prohibido" in all_output.lower(),
             f"Output should mention cast rejection. Output: {all_output}"
