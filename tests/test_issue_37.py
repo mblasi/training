@@ -1790,3 +1790,133 @@ class TestRunRedPhaseWithCasts(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestClassifyCalleeNestedAndPositional(unittest.TestCase):
+    """classify_callee via detect_full_arg_cast: nested calls and non-first arguments."""
+
+    def setUp(self) -> None:
+        import subprocess
+        self.temp_dir = tempfile.mkdtemp(prefix="test_callee_nested_")
+        self.repo_root = Path(self.temp_dir)
+        git = lambda *args: subprocess.run(
+            ["git", *args], cwd=self.repo_root, check=True, capture_output=True
+        )
+        git("init")
+        git("config", "user.email", "test@test.com")
+        git("config", "user.name", "Test")
+        (self.repo_root / "README.md").write_text("# Test repo\n")
+        impl = self.repo_root / "src" / "app.ts"
+        impl.parent.mkdir(parents=True)
+        impl.write_text("export function buildApp() {}\n")
+        git("add", "src/app.ts", "README.md")
+        git("commit", "-m", "init")
+
+    def tearDown(self) -> None:
+        import shutil
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def _run(self, cmd, cwd=None, timeout=None):
+        import subprocess
+        from types import SimpleNamespace
+        result = subprocess.run(
+            cmd, cwd=cwd or self.repo_root, capture_output=True, text=True,
+            timeout=timeout, check=False,
+        )
+        return SimpleNamespace(
+            returncode=result.returncode, stdout=result.stdout, stderr=result.stderr
+        )
+
+    def _detect(self, body: str):
+        """Write an untracked test file importing buildApp and run the real detector."""
+        test_file = self.repo_root / "test" / "app.test.ts"
+        test_file.parent.mkdir(parents=True, exist_ok=True)
+        test_file.write_text(
+            "import { buildApp } from '../src/app.js';\n"
+            "import { vi } from 'vitest';\n\n" + body
+        )
+        return tdd_runner.detect_full_arg_cast(
+            str(self.repo_root), ["test/app.test.ts"], self._run,
+            impl_files=["src/app.ts"],
+        )
+
+    def _assert_accepted_silently(self, result) -> None:
+        self.assertIsNone(result.rejected)
+        self.assertEqual(result.warnings, ())
+
+    def test_nested_in_expect_rejects_impl_symbol(self) -> None:
+        line = f"  expect(buildApp({{ db {_make_cast_pattern('never')}).toBeDefined();"
+        result = self._detect(line + "\n")
+        self.assertEqual(result.rejected, line)
+        self.assertEqual(result.warnings, ())
+
+    def test_nested_in_await_expect_rejects_impl_symbol(self) -> None:
+        line = (
+            f"  await expect(buildApp({{ db {_make_cast_pattern('never')})"
+            ".resolves.toBeDefined();"
+        )
+        result = self._detect(line + "\n")
+        self.assertEqual(result.rejected, line)
+        self.assertEqual(result.warnings, ())
+
+    def test_nested_mock_in_expect_accepts_silently(self) -> None:
+        line = (
+            f"  expect(vi.fn().mockResolvedValue({{ a: 1 {_make_cast_pattern('never')})"
+            ".toBeDefined();"
+        )
+        self._assert_accepted_silently(self._detect(line + "\n"))
+
+    def test_second_argument_impl_symbol_rejected(self) -> None:
+        line = f"  buildApp(first, {{ db {_make_cast_pattern('never')};"
+        result = self._detect(line + "\n")
+        self.assertEqual(result.rejected, line)
+        self.assertEqual(result.warnings, ())
+
+    def test_second_argument_multiline_impl_symbol_rejected(self) -> None:
+        line = f"  {_make_cast_pattern('never')};"
+        result = self._detect(f"  buildApp(first, {{\n    db,\n{line}\n")
+        self.assertEqual(result.rejected, line)
+        self.assertEqual(result.warnings, ())
+
+    def test_third_argument_impl_symbol_rejected(self) -> None:
+        line = f"  buildApp(a, b, {{ db {_make_cast_pattern('never')};"
+        result = self._detect(line + "\n")
+        self.assertEqual(result.rejected, line)
+        self.assertEqual(result.warnings, ())
+
+    def test_second_argument_unknown_callee_warns_once(self) -> None:
+        line = f"  helperFn(first, {{ db {_make_cast_pattern('never')};"
+        result = self._detect(line + "\n")
+        self.assertIsNone(result.rejected)
+        self.assertEqual(len(result.warnings), 1)
+        self.assertIn("helperFn", result.warnings[0])
+        self.assertIn("not resolvable", result.warnings[0])
+
+    def test_second_argument_known_mock_accepts_silently(self) -> None:
+        line = f"  vi.fn().mockImplementation(first, {{ db {_make_cast_pattern('never')};"
+        self._assert_accepted_silently(self._detect(line + "\n"))
+
+    def test_object_property_after_comma_accepts_silently(self) -> None:
+        """Object nested in an object literal after a comma is a property, not an argument."""
+        body = (
+            "  const x = {\n"
+            "    a: 1,\n"
+            f"    b: {{ c: 2 {_make_cast_pattern('never')};\n"
+        )
+        self._assert_accepted_silently(self._detect(body))
+        body = f"  const y = {{ a: 1, {{ c: 2 {_make_cast_pattern('never')};\n"
+        self._assert_accepted_silently(self._detect(body))
+
+    def test_array_element_after_comma_accepts_silently(self) -> None:
+        line = f"  const xs = [ {{ a: 1 }}, {{ b: 2 {_make_cast_pattern('never')};"
+        self._assert_accepted_silently(self._detect(line + "\n"))
+
+    def test_cast_on_outer_object_with_nested_object_rejected(self) -> None:
+        line = f"  buildApp({{ outer: {{ inner: 1 }} {_make_cast_pattern('never')};"
+        result = self._detect(line + "\n")
+        self.assertEqual(result.rejected, line)
+        self.assertEqual(result.warnings, ())
+
+    def test_cast_on_inner_object_property_accepts_silently(self) -> None:
+        line = f"  buildApp({{ outer: {{ inner: 1 {_make_cast_pattern('never')};"
+        self._assert_accepted_silently(self._detect(line + "\n"))
