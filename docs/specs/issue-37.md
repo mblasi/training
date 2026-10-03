@@ -165,7 +165,7 @@ Tests e2e con repo git real (scaffolding commiteado en setUp, run_cmd simula tsc
 
 **Progreso:**
 - [x] RED: tests escritos y fallan
-- [ ] GREEN: tests pasan
+- [x] GREEN: tests pasan
 - [ ] REFACTOR: código limpio
 
 ## Fuera de alcance
