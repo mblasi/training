@@ -164,7 +164,7 @@ Tests e2e con repo git real (scaffolding commiteado en setUp, run_cmd simula tsc
 - `AGENTS.md`
 
 **Progreso:**
-- [ ] RED: tests escritos y fallan
+- [x] RED: tests escritos y fallan
 - [ ] GREEN: tests pasan
 - [ ] REFACTOR: código limpio
 

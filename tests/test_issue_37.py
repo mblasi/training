@@ -1153,6 +1153,399 @@ test('unimported', () => {{
         self.assertIn("4", warning)
 
 
+class TestClassifierBeforeLint(unittest.TestCase):
+    """Test classify_callee in isolation before linting (T5)."""
+    
+    def setUp(self) -> None:
+        """Create temp directory for test files."""
+        self.temp_dir = tempfile.mkdtemp(prefix="test_classifier_before_lint_")
+        self.repo_root = Path(self.temp_dir)
+    
+    def tearDown(self) -> None:
+        """Clean up temp directory."""
+        import shutil
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+    
+    def test_classifier_accepts_mock_before_lint(self) -> None:
+        """detect_full_arg_cast con impl_files y archivo con mockResolvedValue({...} as never) multilínea → result.rejected is None (verifica clasificación en aislamiento, falla si balanceo está roto)."""
+        import subprocess
+        
+        # Create temp git repo
+        subprocess.run(["git", "init"], cwd=self.repo_root, check=True, capture_output=True)
+        subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=self.repo_root, check=True, capture_output=True)
+        subprocess.run(["git", "config", "user.name", "Test"], cwd=self.repo_root, check=True, capture_output=True)
+        
+        # Commit README as scaffolding
+        readme = self.repo_root / "README.md"
+        readme.write_text("# Test\n")
+        subprocess.run(["git", "add", "README.md"], cwd=self.repo_root, check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "init"], cwd=self.repo_root, check=True, capture_output=True)
+        
+        # Create impl file and commit it
+        impl_file = self.repo_root / "src" / "app.ts"
+        impl_file.parent.mkdir(parents=True)
+        impl_file.write_text("export function buildApp() {}")
+        subprocess.run(["git", "add", "src/app.ts"], cwd=self.repo_root, check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "add app"], cwd=self.repo_root, check=True, capture_output=True)
+        
+        # Create test file with multiline mockResolvedValue cast WITHOUT committing
+        test_file = self.repo_root / "test" / "auth.test.ts"
+        test_file.parent.mkdir(parents=True)
+        cast_kw = "never"
+        content = f"""import {{ vi }} from 'vitest';
+
+test('multiline mock', () => {{
+  vi.fn().mockResolvedValue({{
+    data: 'x',
+    count: 42,
+  }} as {cast_kw});
+}});
+"""
+        test_file.write_text(content)
+        
+        def _run(cmd, cwd=None, timeout=None):
+            import subprocess
+            from types import SimpleNamespace
+            cwd = cwd or self.repo_root
+            result = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout, check=False)
+            return SimpleNamespace(returncode=result.returncode, stdout=result.stdout, stderr=result.stderr)
+        
+        # Call detect_full_arg_cast with impl_files
+        result = tdd_runner.detect_full_arg_cast(
+            repo_root=str(self.repo_root),
+            test_files=["test/auth.test.ts"],
+            run_cmd=_run,
+            impl_files=["src/app.ts"]
+        )
+        
+        # Should accept (mockResolvedValue is known external)
+        self.assertIsNone(result.rejected)
+        self.assertEqual(result.warnings, ())
+    
+    def test_classifier_rejects_buildapp_before_lint(self) -> None:
+        """detect_full_arg_cast con impl_files y archivo con buildApp({...} as never) importado del impl_file → result.rejected es la línea (verifica clasificación en aislamiento)."""
+        import subprocess
+        
+        # Create temp git repo
+        subprocess.run(["git", "init"], cwd=self.repo_root, check=True, capture_output=True)
+        subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=self.repo_root, check=True, capture_output=True)
+        subprocess.run(["git", "config", "user.name", "Test"], cwd=self.repo_root, check=True, capture_output=True)
+        
+        # Commit README as scaffolding
+        readme = self.repo_root / "README.md"
+        readme.write_text("# Test\n")
+        subprocess.run(["git", "add", "README.md"], cwd=self.repo_root, check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "init"], cwd=self.repo_root, check=True, capture_output=True)
+        
+        # Create impl file and commit it
+        impl_file = self.repo_root / "src" / "app.ts"
+        impl_file.parent.mkdir(parents=True)
+        impl_file.write_text("export function buildApp() {}")
+        subprocess.run(["git", "add", "src/app.ts"], cwd=self.repo_root, check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "add app"], cwd=self.repo_root, check=True, capture_output=True)
+        
+        # Create test file with buildApp cast WITHOUT committing
+        test_file = self.repo_root / "test" / "auth.test.ts"
+        test_file.parent.mkdir(parents=True)
+        cast_kw = "never"
+        content = f"""import {{ buildApp }} from '../src/app.js';
+
+test('impl cast', () => {{
+  buildApp({{
+    db: mockDb,
+    auth: mockAuth,
+  }} as {cast_kw});
+}});
+"""
+        test_file.write_text(content)
+        
+        def _run(cmd, cwd=None, timeout=None):
+            import subprocess
+            from types import SimpleNamespace
+            cwd = cwd or self.repo_root
+            result = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout, check=False)
+            return SimpleNamespace(returncode=result.returncode, stdout=result.stdout, stderr=result.stderr)
+        
+        # Call detect_full_arg_cast with impl_files
+        result = tdd_runner.detect_full_arg_cast(
+            repo_root=str(self.repo_root),
+            test_files=["test/auth.test.ts"],
+            run_cmd=_run,
+            impl_files=["src/app.ts"]
+        )
+        
+        # Should reject (buildApp is from impl_file)
+        self.assertIsNotNone(result.rejected)
+        pattern = _make_cast_pattern(cast_kw)
+        self.assertIn(pattern, result.rejected)
+        self.assertEqual(result.warnings, ())
+
+
+class TestE2ERunRedPhaseRealRepo(unittest.TestCase):
+    """E2E tests for run_red_phase with real git repo and mocked tsc/eslint (T5)."""
+    
+    def setUp(self) -> None:
+        """Create temp git repo for test files."""
+        import subprocess
+        self.temp_dir = tempfile.mkdtemp(prefix="test_e2e_red_")
+        self.repo_root = Path(self.temp_dir)
+        subprocess.run(["git", "init"], cwd=self.repo_root, check=True, capture_output=True)
+        subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=self.repo_root, check=True, capture_output=True)
+        subprocess.run(["git", "config", "user.name", "Test"], cwd=self.repo_root, check=True, capture_output=True)
+        
+        # Create directory structure
+        (self.repo_root / "app" / "test").mkdir(parents=True)
+        (self.repo_root / "app" / "src").mkdir(parents=True)
+        (self.repo_root / "docs" / "specs").mkdir(parents=True)
+        (self.repo_root / ".backlog" / "runs" / "issue-99").mkdir(parents=True)
+        
+        # Commit scaffolding
+        (self.repo_root / "README.md").write_text("# Test repo\n")
+        (self.repo_root / "package.json").write_text('{"type": "module"}\n')
+        (self.repo_root / "tsconfig.json").write_text('{"compilerOptions": {"target": "ES2020"}}\n')
+        (self.repo_root / ".gitignore").write_text("node_modules/\n*.log\n")
+        
+        impl_file = self.repo_root / "app" / "src" / "app.ts"
+        impl_file.write_text("export function buildApp(_opts?: unknown) {}\n")
+        
+        spec_path = self.repo_root / "docs" / "specs" / "issue-99.md"
+        spec_path.write_text(
+            "---\n"
+            "issue: 99\n"
+            "status: approved\n"
+            'test_command: fake-test-runner\n'
+            "---\n\n"
+            "# Test spec\n\n"
+            "## Tareas\n\n"
+            "### T1: Auth test\n\n"
+            "**Tests:**\n"
+            "- `app/test/auth.test.ts::test_auth`: auth test\n\n"
+            "**Archivos de implementación:**\n"
+            "- `app/src/app.ts`\n\n"
+            "**Progreso:**\n"
+            "- [ ] RED: tests escritos y fallan\n"
+        )
+        
+        subprocess.run(["git", "add", "."], cwd=self.repo_root, check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "setup"], cwd=self.repo_root, check=True, capture_output=True)
+    
+    def tearDown(self) -> None:
+        """Clean up temp directory."""
+        import shutil
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+    
+    def _make_run_cmd(self, test_runs: list):
+        """Git is real; corepack (tsc/eslint) always passes; test command fails and is recorded."""
+        from types import SimpleNamespace
+        import subprocess
+        
+        def run_cmd(cmd, cwd=None, timeout=None):
+            if cmd and cmd[0] == "git":
+                cwd = cwd or self.repo_root
+                result = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout, check=False)
+                return SimpleNamespace(returncode=result.returncode, stdout=result.stdout, stderr=result.stderr)
+            if cmd and cmd[0] == "corepack":
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
+            test_runs.append(list(cmd))
+            return SimpleNamespace(returncode=1, stdout="1 failed\n", stderr="")
+        
+        return run_cmd
+    
+    def test_e2e_impl_cast_rejected(self) -> None:
+        """repo git real con scaffolding commiteado (app/src/app.ts con export buildApp, app/test/auth.test.ts importando buildApp, package.json, tsconfig.json, spec, .gitignore); coder escribe buildApp({ db, auth } as never) → run_red_phase rechaza, coder invocado 2 veces, sin commit de test tras primer intento; run_cmd simula tsc/eslint con returncode=0."""
+        import subprocess
+        
+        task = {
+            "id": "T1",
+            "title": "Auth test",
+            "description": "Test auth",
+            "tests": [{"file": "app/test/auth.test.ts", "name": "test_auth", "asserts": "auth test"}],
+            "impl_files": ["app/src/app.ts"],
+        }
+        spec = {"summary": "Auth test", "decisions": [], "tasks": [task]}
+        spec_path = self.repo_root / "docs" / "specs" / "issue-99.md"
+        logs_dir = self.repo_root / ".backlog" / "runs" / "issue-99"
+        
+        cast_kw = "never"
+        coder_calls: list[dict] = []
+        test_runs: list = []
+        prints: list[str] = []
+        
+        def fake_coder(prompt: str, log_path: str) -> tuple[int, str]:
+            coder_calls.append({"prompt": prompt})
+            
+            # First call: write test with cast
+            if len(coder_calls) == 1:
+                content = (
+                    "import { buildApp } from '../src/app.js';\n\n"
+                    "test('test_auth', () => {\n"
+                    f"  buildApp({{ db: 'x', auth: 'y' {_make_cast_pattern(cast_kw)};\n"
+                    "});\n"
+                )
+            else:
+                # Second call: write test without cast
+                content = (
+                    "import { buildApp } from '../src/app.js';\n\n"
+                    "test('test_auth', () => {\n"
+                    "  buildApp({ db: 'x', auth: 'y' });\n"
+                    "});\n"
+                )
+            
+            (self.repo_root / "app" / "test" / "auth.test.ts").write_text(content)
+            return 0, "done"
+        
+        result = tdd_runner.run_red_phase(
+            repo_root=str(self.repo_root),
+            issue_num=99,
+            task=task,
+            spec=spec,
+            spec_path=spec_path,
+            test_cmd=["fake-test-runner"],
+            logs_dir=logs_dir,
+            coder=fake_coder,
+            run_cmd=self._make_run_cmd(test_runs),
+            input_fn=lambda p: "",
+            print_fn=prints.append,
+        )
+        
+        # Should succeed after 2 coder invocations
+        self.assertTrue(result)
+        self.assertEqual(len(coder_calls), 2)
+        
+        # First attempt should be rejected (no test commit)
+        commits = subprocess.run(
+            ["git", "log", "--oneline"],
+            cwd=self.repo_root,
+            capture_output=True,
+            text=True,
+            check=True
+        ).stdout
+        
+        # Should have exactly one test commit (from second attempt)
+        test_commits = [line for line in commits.split('\n') if 'test:' in line.lower()]
+        self.assertEqual(len(test_commits), 1)
+    
+    def test_e2e_mock_cast_accepted(self) -> None:
+        """repo git real con scaffolding commiteado; coder escribe vi.mocked(fn).mockResolvedValue({\\n  data: x,\\n} as never) multilínea → run_red_phase retorna True, commit de test presente en git log; run_cmd simula tsc/eslint con returncode=0."""
+        import subprocess
+        
+        task = {
+            "id": "T1",
+            "title": "Mock test",
+            "description": "Test with mock",
+            "tests": [{"file": "app/test/auth.test.ts", "name": "test_mock", "asserts": "mock test"}],
+            "impl_files": ["app/src/app.ts"],
+        }
+        spec = {"summary": "Mock test", "decisions": [], "tasks": [task]}
+        spec_path = self.repo_root / "docs" / "specs" / "issue-99.md"
+        logs_dir = self.repo_root / ".backlog" / "runs" / "issue-99"
+        
+        cast_kw = "never"
+        coder_calls: list[dict] = []
+        test_runs: list = []
+        prints: list[str] = []
+        
+        def fake_coder(prompt: str, log_path: str) -> tuple[int, str]:
+            coder_calls.append({"prompt": prompt})
+            
+            content = (
+                "import { vi } from 'vitest';\n"
+                "import { fn } from './helpers.js';\n\n"
+                "test('test_mock', () => {\n"
+                "  vi.mocked(fn).mockResolvedValue({\n"
+                "    data: 'x',\n"
+                f"  {_make_cast_pattern(cast_kw)};\n"
+                "});\n"
+            )
+            
+            (self.repo_root / "app" / "test" / "auth.test.ts").write_text(content)
+            return 0, "done"
+        
+        result = tdd_runner.run_red_phase(
+            repo_root=str(self.repo_root),
+            issue_num=99,
+            task=task,
+            spec=spec,
+            spec_path=spec_path,
+            test_cmd=["fake-test-runner"],
+            logs_dir=logs_dir,
+            coder=fake_coder,
+            run_cmd=self._make_run_cmd(test_runs),
+            input_fn=lambda p: "",
+            print_fn=prints.append,
+        )
+        
+        # Should succeed after 1 coder invocation
+        self.assertTrue(result)
+        self.assertEqual(len(coder_calls), 1)
+        
+        # Should have test commit
+        commits = subprocess.run(
+            ["git", "log", "--oneline"],
+            cwd=self.repo_root,
+            capture_output=True,
+            text=True,
+            check=True
+        ).stdout
+        
+        test_commits = [line for line in commits.split('\n') if 'test:' in line.lower()]
+        self.assertEqual(len(test_commits), 1)
+        
+        # Output should not mention cast rejection
+        all_output = "\n".join(prints)
+        self.assertNotIn("prohibido", all_output.lower())
+        self.assertNotIn(_make_cast_pattern(cast_kw), all_output)
+
+
+class TestAgentsMdDocumentation(unittest.TestCase):
+    """Test that AGENTS.md documents the cast detector rules (T5)."""
+    
+    def setUp(self) -> None:
+        """Get path to AGENTS.md."""
+        self.agents_md = Path(__file__).parent.parent / "AGENTS.md"
+        self.assertTrue(self.agents_md.exists(), "AGENTS.md not found")
+        self.content = self.agents_md.read_text()
+    
+    def test_agents_md_callee_rule(self) -> None:
+        """AGENTS.md contiene texto sobre rechazar solo si el callee es importado de un impl_file (busca 'impl_file' en la sección del detector de casts)."""
+        # Should find impl_file mentioned in the cast detector section
+        self.assertIn("impl_file", self.content)
+        
+        # Should find text about rejecting only when callee is from impl_file
+        # The section at line 84 should mention this
+        lines = self.content.split('\n')
+        cast_section_found = False
+        for i, line in enumerate(lines):
+            if "casts sobre argumentos completos" in line.lower():
+                cast_section_found = True
+                # Check nearby lines for impl_file mention
+                nearby = '\n'.join(lines[max(0, i-5):min(len(lines), i+20)])
+                self.assertIn("impl_file", nearby)
+                break
+        
+        self.assertTrue(cast_section_found, "Cast detector section not found in AGENTS.md")
+    
+    def test_agents_md_examples(self) -> None:
+        """AGENTS.md contiene 'mockResolvedValue' como ejemplo aceptado y 'buildApp' como ejemplo rechazado en la sección del detector."""
+        # Should find mockResolvedValue as accepted example
+        self.assertIn("mockResolvedValue", self.content)
+        
+        # Should find buildApp as rejected example
+        self.assertIn("buildApp", self.content)
+    
+    def test_agents_md_barrel_limit(self) -> None:
+        """AGENTS.md menciona el límite de barrel files o re-exports en la sección del detector de casts."""
+        # Should mention barrel files or re-exports limitation
+        content_lower = self.content.lower()
+        has_barrel = "barrel" in content_lower
+        has_reexport = "re-export" in content_lower or "reexport" in content_lower
+        
+        self.assertTrue(
+            has_barrel or has_reexport,
+            "AGENTS.md should mention barrel files or re-exports limitation"
+        )
+
+
 class TestRunRedPhaseWithCasts(unittest.TestCase):
     """Test run_red_phase with new cast detection logic (T4)."""
     
