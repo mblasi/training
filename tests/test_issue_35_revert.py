@@ -12,11 +12,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
 import tdd_runner
 
 
-def _make_cast_pattern(kw: str) -> str:
-    """Helper to construct cast pattern dynamically (avoid triggering detector)."""
-    return f"}} as {kw})"
-
-
 def _git(repo: Path, *args: str) -> subprocess.CompletedProcess:
     return subprocess.run(["git", *args], cwd=repo, capture_output=True, text=True, check=True)
 
@@ -152,15 +147,7 @@ test_command: pnpm test
 """
 
 OLD_ORIGINAL = "import { test } from 'vitest';\ntest('old', () => {});\n"
-
-
-def _build_cast_line():
-    """Build CAST_LINE dynamically to avoid triggering detector."""
-    cast_kw = "never"
-    return f"  buildApp({{ db }} as {cast_kw});\n"
-
-
-CAST_LINE = _build_cast_line()
+CAST_LINE = "  buildApp({ db } as never);\n"
 
 
 class _RedPhaseBase(unittest.TestCase):
@@ -282,13 +269,11 @@ class TestRedCastNoRevertBetweenAttempts(_RedPhaseBase):
 
         self.assertTrue(result)
         self.assertEqual(len(seen), 2)
-        # Build expected pattern dynamically
-        expected_pattern = _make_cast_pattern("never")
-        self.assertIn(expected_pattern, seen[1]["old"] or "",
+        self.assertIn("buildApp({ db } as never);", seen[1]["old"] or "",
                       "tracked edit from attempt 1 must still be on disk in attempt 2")
-        self.assertIn(expected_pattern, seen[1]["new"] or "",
+        self.assertIn("buildApp({ db } as never);", seen[1]["new"] or "",
                       "new file from attempt 1 must still be on disk in attempt 2")
-        self.assertIn("buildApp", seen[1]["prompt"])
+        self.assertIn("as never", seen[1]["prompt"])
 
     def test_exhausted_cast_attempts_and_abort_reverts_everything(self) -> None:
         calls = []
