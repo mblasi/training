@@ -173,7 +173,8 @@ def classify_callee(
     Classification rules (in order):
     1. Callee in symbol_map (imported from impl_file) → REJECT
     2. Last segment of callee in KNOWN_EXTERNAL_CALLEES → ACCEPT (no warning)
-    3. Callee not resolvable → ACCEPT with warning
+    3. Base identifier of callee (first dotted segment) in symbol_map → REJECT
+    4. Callee not resolvable → ACCEPT with warning
     
     Non-argument contexts (=, :, return, )) are always accepted without warning.
     Unbalanced braces → ACCEPT with warning.
@@ -272,11 +273,16 @@ def classify_callee(
     if callee in symbol_map:
         return CastCheckResult(rejected=trigger_line.rstrip(), warnings=())
     
-    # Rule 2: last segment is a known external function
+    # Rule 2: last segment is a known external function (wins over the base identifier)
     if callee.split('.')[-1] in KNOWN_EXTERNAL_CALLEES:
         return accepted
     
-    # Rule 3: callee not resolvable - accept with warning
+    # Rule 3: method of an imported symbol (base identifier is in the symbol map)
+    base_match = re.match(r'[A-Za-z_$][\w$]*', callee)
+    if base_match and base_match.group(0) in symbol_map:
+        return CastCheckResult(rejected=trigger_line.rstrip(), warnings=())
+    
+    # Rule 4: callee not resolvable - accept with warning
     return CastCheckResult(
         rejected=None,
         warnings=(

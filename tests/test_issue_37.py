@@ -1545,6 +1545,14 @@ class TestAgentsMdDocumentation(unittest.TestCase):
             "AGENTS.md should mention barrel files or re-exports limitation"
         )
 
+    def test_agents_md_documents_closed_list_and_limits(self) -> None:
+        """AGENTS.md documents the closed external list and the known limits."""
+        content_lower = self.content.lower()
+        self.assertIn("KNOWN_EXTERNAL_CALLEES", self.content)
+        self.assertIn("mockResolvedValue", self.content)
+        for term in ("alias", "namespace", "comentarios", "strings"):
+            self.assertIn(term, content_lower)
+
 
 class TestRunRedPhaseWithCasts(unittest.TestCase):
     """Test run_red_phase with new cast detection logic (T4)."""
@@ -1920,3 +1928,81 @@ class TestClassifyCalleeNestedAndPositional(unittest.TestCase):
     def test_cast_on_inner_object_property_accepts_silently(self) -> None:
         line = f"  buildApp({{ outer: {{ inner: 1 {_make_cast_pattern('never')};"
         self._assert_accepted_silently(self._detect(line + "\n"))
+
+
+class TestClassifyCalleeImportedObjectMethod(unittest.TestCase):
+    """classify_callee via detect_full_arg_cast: methods of an imported object."""
+
+    def setUp(self) -> None:
+        import subprocess
+        self.temp_dir = tempfile.mkdtemp(prefix="test_callee_method_")
+        self.repo_root = Path(self.temp_dir)
+        git = lambda *args: subprocess.run(
+            ["git", *args], cwd=self.repo_root, check=True, capture_output=True
+        )
+        git("init")
+        git("config", "user.email", "test@test.com")
+        git("config", "user.name", "Test")
+        (self.repo_root / "README.md").write_text("# Test repo\n")
+        impl = self.repo_root / "src" / "app.ts"
+        impl.parent.mkdir(parents=True)
+        impl.write_text(
+            "export const api = { build() {}, users: { create() {} } };\n"
+            "export function buildApp() {}\n"
+        )
+        git("add", "src/app.ts", "README.md")
+        git("commit", "-m", "init")
+
+    def tearDown(self) -> None:
+        import shutil
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def _run(self, cmd, cwd=None, timeout=None):
+        import subprocess
+        from types import SimpleNamespace
+        result = subprocess.run(
+            cmd, cwd=cwd or self.repo_root, capture_output=True, text=True,
+            timeout=timeout, check=False,
+        )
+        return SimpleNamespace(
+            returncode=result.returncode, stdout=result.stdout, stderr=result.stderr
+        )
+
+    def _detect(self, body: str):
+        test_file = self.repo_root / "test" / "app.test.ts"
+        test_file.parent.mkdir(parents=True, exist_ok=True)
+        test_file.write_text("import { api } from '../src/app.js';\n\n" + body)
+        return tdd_runner.detect_full_arg_cast(
+            str(self.repo_root), ["test/app.test.ts"], self._run,
+            impl_files=["src/app.ts"],
+        )
+
+    def test_method_of_imported_object_rejected(self) -> None:
+        line = f"  api.build({{ db {_make_cast_pattern('never')};"
+        result = self._detect(line + "\n")
+        self.assertEqual(result.rejected, line)
+        self.assertEqual(result.warnings, ())
+
+    def test_nested_method_of_imported_object_rejected(self) -> None:
+        line = f"  api.users.create({{ a: 1 {_make_cast_pattern('never')};"
+        result = self._detect(line + "\n")
+        self.assertEqual(result.rejected, line)
+        self.assertEqual(result.warnings, ())
+
+    def test_method_of_imported_object_in_expect_rejected(self) -> None:
+        line = f"  expect(api.build({{ db {_make_cast_pattern('never')}).toBeDefined();"
+        result = self._detect(line + "\n")
+        self.assertEqual(result.rejected, line)
+        self.assertEqual(result.warnings, ())
+
+    def test_mock_method_on_imported_object_accepts_silently(self) -> None:
+        line = f"  api.build.mockReturnValue({{ db {_make_cast_pattern('never')};"
+        result = self._detect(line + "\n")
+        self.assertIsNone(result.rejected)
+        self.assertEqual(result.warnings, ())
+
+    def test_method_of_unimported_object_warns_once(self) -> None:
+        line = f"  other.build({{ db {_make_cast_pattern('never')};"
+        result = self._detect(line + "\n")
+        self.assertIsNone(result.rejected)
+        self.assertEqual(len(result.warnings), 1)
