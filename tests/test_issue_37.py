@@ -1190,126 +1190,209 @@ class TestRunRedPhaseWithCasts(unittest.TestCase):
         result = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout, check=False)
         return SimpleNamespace(returncode=result.returncode, stdout=result.stdout, stderr=result.stderr)
     
-    def test_run_red_mock_cast_accepted(self) -> None:
-        """run_red_phase con coder que escribe mockResolvedValue({ data } as never), impl_files sin mockResolvedValue → retorna True sin feedback de cast en prints; repo git con scaffolding commiteado."""
-        # Setup
+    def _make_run_cmd(self, test_runs: list):
+        """Git is real; corepack (tsc/eslint) always passes; the test command fails and is recorded.
+
+        The only possible cause of a RED rejection is then the cast detector.
+        """
+        from types import SimpleNamespace
+
+        def run_cmd(cmd, cwd=None, timeout=None):
+            if cmd and cmd[0] == "git":
+                return self._run(cmd, cwd, timeout)
+            if cmd and cmd[0] == "corepack":
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
+            test_runs.append(list(cmd))
+            return SimpleNamespace(returncode=1, stdout="1 failed\n", stderr="")
+
+        return run_cmd
+
+    def _scaffold(self):
+        """Commit README/package.json/tsconfig/src/app.ts/spec; return (spec_path, spec, task, logs_dir)."""
         import subprocess
-        
-        # Commit package.json and tsconfig
-        package_json = self.repo_root / "package.json"
-        package_json.write_text('{"type": "module"}\n')
-        tsconfig = self.repo_root / "tsconfig.json"
-        tsconfig.write_text('{"compilerOptions": {"target": "ES2020"}}\n')
-        
-        impl_file = self.repo_root / "src" / "app.ts"
-        impl_file.write_text("export function buildApp() {}\n")
-        
-        subprocess.run(["git", "add", "."], cwd=self.repo_root, check=True, capture_output=True)
-        subprocess.run(["git", "commit", "-m", "setup"], cwd=self.repo_root, check=True, capture_output=True)
-        
-        # Create spec
+
+        (self.repo_root / "package.json").write_text('{"type": "module"}\n')
+        (self.repo_root / "tsconfig.json").write_text('{"compilerOptions": {"target": "ES2020"}}\n')
+        (self.repo_root / "src" / "app.ts").write_text("export function buildApp(_opts?: unknown) {}\n")
         spec_path = self.repo_root / "docs" / "specs" / "issue-37.md"
-        spec_content = """---
-issue: 37
-status: approved
-test_command: echo "OK"
----
+        spec_path.write_text(
+            "---\n"
+            "issue: 37\n"
+            "status: approved\n"
+            'test_command: fake-test-runner\n'
+            "---\n\n"
+            "# Test spec\n\n"
+            "## Tareas\n\n"
+            "### T1: Cast test\n\n"
+            "**Tests:**\n"
+            "- `tests/x.test.ts::test_x`: expect(false).toBe(true)\n\n"
+            "**Archivos de implementación:**\n"
+            "- `src/app.ts`\n\n"
+            "**Progreso:**\n"
+            "- [ ] RED: tests escritos y fallan\n"
+        )
+        subprocess.run(
+            ["git", "add", "package.json", "tsconfig.json", "src/app.ts", "docs/specs/issue-37.md"],
+            cwd=self.repo_root, check=True, capture_output=True,
+        )
+        subprocess.run(["git", "commit", "-m", "setup"], cwd=self.repo_root, check=True, capture_output=True)
 
-# Test spec
-
-## Tareas
-
-### T1: Mock cast test
-
-**Tests:**
-- `tests/mock.test.ts::test_mock`: expect(false).toBe(true)
-
-**Archivos de implementación:**
-- `src/app.ts`
-
-**Progreso:**
-- [ ] RED: tests escritos y fallan
-"""
-        spec_path.write_text(spec_content)
-        subprocess.run(["git", "add", str(spec_path)], cwd=self.repo_root, check=True, capture_output=True)
-        subprocess.run(["git", "commit", "-m", "docs: spec"], cwd=self.repo_root, check=True, capture_output=True)
-        
-        spec = {
-            "summary": "Mock cast test",
-            "decisions": [],
-            "tasks": [
-                {
-                    "id": "T1",
-                    "title": "Mock cast test",
-                    "description": "Test description",
-                    "tests": [{"file": "tests/mock.test.ts", "name": "test_mock", "asserts": "expect(false).toBe(true)"}],
-                    "impl_files": ["src/app.ts"]
-                }
-            ]
+        task = {
+            "id": "T1",
+            "title": "Cast test",
+            "description": "Test description",
+            "tests": [{"file": "tests/x.test.ts", "name": "test_x", "asserts": "expect(false).toBe(true)"}],
+            "impl_files": ["src/app.ts"],
         }
-        
-        task = spec["tasks"][0]
-        
-        # Track coder calls
-        coder_calls = []
-        cast_kw = "never"
-        
-        def fake_coder(prompt: str, log_path: str) -> tuple[int, str]:
-            coder_calls.append({"prompt": prompt})
-            test_file_path = self.repo_root / "tests" / "mock.test.ts"
-            # Write test with mock cast (should be accepted)
-            content = f"""import {{ vi }} from 'vitest';
-
-test('mock', () => {{
-  vi.fn().mockResolvedValue({{ data: 'x' }} as {cast_kw});
-}});
-"""
-            test_file_path.write_text(content)
-            return 0, "Tests with mock cast"
-        
-        # Mock run_cmd to simulate test failure (for RED to pass)
-        def mock_run_cmd(cmd, cwd=None, timeout=None):
-            from types import SimpleNamespace
-            if cmd == ["echo", "OK"]:
-                return SimpleNamespace(returncode=1, stdout="FAIL\n", stderr="")
-            return self._run(cmd, cwd, timeout)
-        
-        # Capture print output
-        print_output = []
-        def mock_print(msg: str) -> None:
-            print_output.append(msg)
-        
+        spec = {"summary": "Cast test", "decisions": [], "tasks": [task]}
         logs_dir = self.repo_root / ".backlog" / "runs" / "issue-37"
-        
-        # Run RED phase
-        result = tdd_runner.run_red_phase(
+        return spec_path, spec, task, logs_dir
+
+    def _run_red(self, coder, prints: list, test_runs: list):
+        spec_path, spec, task, logs_dir = self._scaffold()
+        return tdd_runner.run_red_phase(
             repo_root=str(self.repo_root),
             issue_num=37,
             task=task,
             spec=spec,
             spec_path=spec_path,
-            test_cmd=["echo", "OK"],
+            test_cmd=["fake-test-runner"],
             logs_dir=logs_dir,
-            coder=fake_coder,
-            run_cmd=mock_run_cmd,
+            coder=coder,
+            run_cmd=self._make_run_cmd(test_runs),
             input_fn=lambda p: "",
-            print_fn=mock_print
+            print_fn=prints.append,
         )
-        
-        # Should succeed (mock cast is accepted)
-        self.assertTrue(result)
-        
-        # Should have made only 1 coder call (no rejection)
-        self.assertEqual(len(coder_calls), 1)
-        
-        # Print output should NOT contain cast rejection feedback
-        all_output = "\n".join(print_output)
-        self.assertNotIn("prohibido", all_output.lower())
-        # Should not mention the specific cast pattern
-        pattern = _make_cast_pattern(cast_kw)
-        self.assertNotIn(pattern, all_output)
-    
 
+    def test_run_red_mock_cast_accepted(self) -> None:
+        """Cast sobre el argumento completo de mockResolvedValue (callee externo conocido) se acepta: RED True, sin feedback de cast."""
+        cast_kw = "never"
+        coder_calls: list[dict] = []
+        test_runs: list = []
+        prints: list[str] = []
+
+        def fake_coder(prompt: str, log_path: str) -> tuple[int, str]:
+            coder_calls.append({"prompt": prompt})
+            content = (
+                "import { vi } from 'vitest';\n\n"
+                "test('mock', () => {\n"
+                f"  vi.fn().mockResolvedValue({{ data: 'x' {_make_cast_pattern(cast_kw)};\n"
+                "});\n"
+            )
+            (self.repo_root / "tests" / "x.test.ts").write_text(content)
+            return 0, "Tests with mock cast"
+
+        result = self._run_red(fake_coder, prints, test_runs)
+
+        self.assertTrue(result)
+        self.assertEqual(len(coder_calls), 1)
+        all_output = "\n".join(prints)
+        self.assertNotIn("prohibido", all_output.lower())
+        self.assertNotIn(_make_cast_pattern(cast_kw), all_output)
+
+    def test_run_red_impl_cast_rejected_retries(self) -> None:
+        """Cast sobre el argumento completo de un símbolo importado de un impl_file se rechaza; el coder reintenta sin el cast."""
+        cast_line = f"  buildApp({{ db: 'x' {_make_cast_pattern('never')};"
+        coder_calls: list[dict] = []
+        test_runs: list = []
+        prints: list[str] = []
+
+        def fake_coder(prompt: str, log_path: str) -> tuple[int, str]:
+            coder_calls.append({"prompt": prompt})
+            call_line = cast_line if len(coder_calls) == 1 else "  buildApp({ db: 'x' });"
+            content = (
+                "import { buildApp } from '../src/app.js';\n\n"
+                "test('x', () => {\n"
+                f"{call_line}\n"
+                "});\n"
+            )
+            (self.repo_root / "tests" / "x.test.ts").write_text(content)
+            return 0, "done"
+
+        result = self._run_red(fake_coder, prints, test_runs)
+
+        self.assertTrue(result)
+        self.assertEqual(len(coder_calls), 2)
+        self.assertIn(cast_line.strip(), coder_calls[1]["prompt"])
+        # The detector cuts the first attempt before the tests are run
+        self.assertEqual(len(test_runs), 1)
+
+    def test_run_red_warning_printed_once(self) -> None:
+        """Tres casts sobre un callee no resoluble producen UNA sola advertencia impresa."""
+        cast_line = f"  helperFn({{ a: 1 {_make_cast_pattern('never')};"
+        test_runs: list = []
+        prints: list[str] = []
+
+        def fake_coder(prompt: str, log_path: str) -> tuple[int, str]:
+            content = (
+                "test('x', () => {\n"
+                f"{cast_line}\n"
+                f"{cast_line}\n"
+                f"{cast_line}\n"
+                "});\n"
+            )
+            (self.repo_root / "tests" / "x.test.ts").write_text(content)
+            return 0, "done"
+
+        result = self._run_red(fake_coder, prints, test_runs)
+
+        self.assertTrue(result)
+        all_output = "\n".join(prints)
+        self.assertEqual(all_output.count("no pude determinar el callee"), 1)
+
+    def test_run_red_warning_written_to_log(self) -> None:
+        """La advertencia de callee no resoluble se escribe en el log de la tarea con archivo:línea."""
+        cast_line = f"  helperFn({{ a: 1 {_make_cast_pattern('never')};"
+        test_runs: list = []
+        prints: list[str] = []
+
+        def fake_coder(prompt: str, log_path: str) -> tuple[int, str]:
+            content = (
+                "test('x', () => {\n"
+                f"{cast_line}\n"
+                "});\n"
+            )
+            (self.repo_root / "tests" / "x.test.ts").write_text(content)
+            return 0, "done"
+
+        result = self._run_red(fake_coder, prints, test_runs)
+
+        self.assertTrue(result)
+        logs_dir = self.repo_root / ".backlog" / "runs" / "issue-37"
+        log_files = sorted(logs_dir.glob("T1-red-*.log"))
+        self.assertTrue(log_files, "no task log was written")
+        combined = "\n".join(f.read_text() for f in log_files)
+        # The cast is on line 2 of tests/x.test.ts
+        self.assertIn("tests/x.test.ts:2", combined)
+
+    def test_run_red_multiline_mock_accepted(self) -> None:
+        """Mock multilínea (mockResolvedValue abierto en una línea, cast sobre el argumento completo al cerrar) se acepta sin feedback ni advertencia."""
+        coder_calls: list[dict] = []
+        test_runs: list = []
+        prints: list[str] = []
+
+        def fake_coder(prompt: str, log_path: str) -> tuple[int, str]:
+            coder_calls.append({"prompt": prompt})
+            content = (
+                "import { vi } from 'vitest';\n"
+                "import { fn } from './helpers';\n\n"
+                "test('x', () => {\n"
+                "  vi.mocked(fn).mockResolvedValue({\n"
+                "    data: 'x',\n"
+                "    count: 1,\n"
+                f"  {_make_cast_pattern('never')};\n"
+                "});\n"
+            )
+            (self.repo_root / "tests" / "x.test.ts").write_text(content)
+            return 0, "done"
+
+        result = self._run_red(fake_coder, prints, test_runs)
+
+        self.assertTrue(result)
+        self.assertEqual(len(coder_calls), 1)
+        all_output = "\n".join(prints)
+        self.assertNotIn("cast", all_output.lower())
+        self.assertNotIn("no pude determinar el callee", all_output)
 
 
 if __name__ == "__main__":
