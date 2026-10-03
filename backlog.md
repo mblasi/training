@@ -4,11 +4,11 @@
 
 ## 🚧 En curso (WIP)
 
-- [ ] [#37](https://github.com/mblasi/training/issues/37) Harness: el detector de casts rechaza casts legítimos sobre valores de mocks (falso positivo) · fix · @mblasi
+_Nada por ahora._
 
 ## 👀 En revisión
 
-_Nada por ahora._
+- [ ] [#37](https://github.com/mblasi/training/issues/37) Harness: el detector de casts rechaza casts legítimos sobre valores de mocks (falso positivo) · fix · @mblasi
 
 ## 📋 Pendiente
 
