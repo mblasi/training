@@ -144,7 +144,7 @@ Reescribir detect_full_arg_cast con nueva firma (impl_files opcional), integrar 
 
 **Progreso:**
 - [x] RED: tests escritos y fallan
-- [ ] GREEN: tests pasan
+- [x] GREEN: tests pasan
 - [ ] REFACTOR: código limpio
 
 ### T5: E2E de run_red_phase con repo git real + AGENTS.md

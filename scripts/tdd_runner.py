@@ -814,7 +814,12 @@ def get_new_lines(repo_root: str, file: str, run_cmd: Callable) -> list[str]:
         return new_lines
 
 
-def detect_full_arg_cast(repo_root: str, test_files: list[str], run_cmd: Callable) -> str | None:
+def detect_full_arg_cast(
+    repo_root: str,
+    test_files: list[str],
+    run_cmd: Callable,
+    impl_files: list[str] | None = None
+) -> CastCheckResult:
     """
     Detect prohibited type casts over full arguments in test files.
     
@@ -823,17 +828,20 @@ def detect_full_arg_cast(repo_root: str, test_files: list[str], run_cmd: Callabl
     - } as any)
     - } as unknown as <ident>)
     
-    These patterns indicate casting the entire argument object to bypass type checks,
-    which is prohibited. Property casts (e.g. 'db: mockDb as never,') and variable
-    casts (e.g. 'const x = fakeDb as never;') are allowed.
+    With impl_files=None: rejects all cast patterns (legacy #35 behavior).
+    With impl_files: balances braces/parens, classifies callee:
+      - Callee imported from impl_file → REJECT
+      - Callee is known external (mock/matcher) → ACCEPT
+      - Callee not resolvable → ACCEPT with warning
     
     Args:
         repo_root: Repository root path
         test_files: List of test file paths (relative to repo_root)
         run_cmd: Command runner function
+        impl_files: Optional list of impl file paths (enables callee classification)
     
     Returns:
-        The first problematic line found, or None if no issues
+        CastCheckResult with rejected line (if any) and warnings tuple
     """
     import re
     
@@ -844,15 +852,42 @@ def detect_full_arg_cast(repo_root: str, test_files: list[str], run_cmd: Callabl
         r"\}\s+as\s+unknown\s+as\s+\w+\s*\)",
     ]
     
+    # Legacy behavior (impl_files=None): reject all cast patterns
+    if impl_files is None:
+        for test_file in test_files:
+            new_lines = get_new_lines(repo_root, test_file, run_cmd)
+            
+            for line in new_lines:
+                for pattern in patterns:
+                    if re.search(pattern, line):
+                        return CastCheckResult(rejected=line, warnings=())
+        
+        return CastCheckResult(rejected=None, warnings=())
+    
+    # New behavior: build symbol map once per file and classify
+    all_warnings = []
+    
     for test_file in test_files:
         new_lines = get_new_lines(repo_root, test_file, run_cmd)
+        
+        # Build symbol map for this test file once
+        symbol_map = build_symbol_to_impl_map(test_file, impl_files, repo_root)
         
         for line in new_lines:
             for pattern in patterns:
                 if re.search(pattern, line):
-                    return line
+                    # Classify this cast
+                    result = classify_callee(test_file, line, symbol_map, repo_root)
+                    
+                    if result.rejected:
+                        # Return immediately on first rejection
+                        return result
+                    
+                    # Accumulate warnings
+                    if result.warnings:
+                        all_warnings.extend(result.warnings)
     
-    return None
+    return CastCheckResult(rejected=None, warnings=tuple(all_warnings))
 
 
 def check_test_files_static(repo_root: str, test_files: list[str], run_cmd: Callable, impl_files: list[str] | None = None) -> str | None:
@@ -1768,20 +1803,44 @@ def run_red_phase(
                     return False
                 break
         
-        # Check for prohibited full-argument casts (D3)
+        # Check for prohibited full-argument casts
         changed_test_files = [f for f in changed if is_test_file(f)]
         if changed_test_files:
-            cast_line = detect_full_arg_cast(repo_root, changed_test_files, run_cmd)
-            if cast_line:
+            cast_result = detect_full_arg_cast(
+                repo_root,
+                changed_test_files,
+                run_cmd,
+                impl_files
+            )
+            
+            # Write all warnings to task log
+            if cast_result.warnings:
+                for warning in cast_result.warnings:
+                    with open(log_path, "a") as log:
+                        log.write(f"\n{warning}\n")
+            
+            # Print warning summary once (only if we have warnings)
+            if cast_result.warnings and attempt == 0:
+                # Extract file and line from first warning using regex
+                first_warning = cast_result.warnings[0]
+                location_match = re.search(r'([^\s:]+:\d+)', first_warning)
+                if location_match:
+                    location = location_match.group(1)
+                    warning_msg = f"no pude determinar el callee del cast en {location}, revisalo en el diff"
+                    if len(cast_result.warnings) > 1:
+                        warning_msg += f" (+{len(cast_result.warnings) - 1} más en el log de la tarea)"
+                    print_fn(warning_msg)
+            
+            if cast_result.rejected:
                 print_fn(f"Error: cast prohibido sobre argumento completo detectado:")
-                print_fn(f"  {cast_line}")
+                print_fn(f"  {cast_result.rejected}")
                 print_fn("No uses casts '} as never)', '} as any)' o '} as unknown as X)' sobre el argumento completo.")
                 
                 # Do NOT revert between attempts (D2): the coder fixes in place.
                 # Only revert on abort or exhausted attempts.
                 if attempt < max_attempts - 1:
                     print_fn("Reintentando RED...\n")
-                    last_feedback = f"Cast prohibido detectado en línea:\n\n  {cast_line}\n\nNo uses casts '}} as never)', '}} as any)' o '}} as unknown as X)' sobre el argumento completo. Corregí los archivos de test existentes."
+                    last_feedback = f"Cast prohibido detectado en línea:\n\n  {cast_result.rejected}\n\nNo uses casts '}} as never)', '}} as any)' o '}} as unknown as X)' sobre el argumento completo. Corregí los archivos de test existentes."
                     attempt += 1
                     continue
                 else:
