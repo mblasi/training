@@ -137,7 +137,7 @@ Reescribir detect_full_arg_cast con nueva firma (impl_files opcional), integrar 
 - `scripts/tdd_runner.py`
 
 **Progreso:**
-- [ ] RED: tests escritos y fallan
+- [x] RED: tests escritos y fallan
 - [ ] GREEN: tests pasan
 - [ ] REFACTOR: código limpio
 
