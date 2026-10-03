@@ -157,6 +157,7 @@ test_command: pnpm test
 """
 
 OLD_ORIGINAL = "import { test } from 'vitest';\ntest('old', () => {});\n"
+IMPL_IMPORT = "import { buildApp } from '../src/impl.js';\n"
 
 
 def _make_cast_line() -> str:
@@ -178,7 +179,7 @@ class _RedPhaseBase(unittest.TestCase):
         (self.repo / "app" / "package.json").write_text('{"name": "app"}\n')
         (self.repo / "app" / "tsconfig.json").write_text("{}\n")
         (self.repo / "app" / "test" / "old.test.ts").write_text(OLD_ORIGINAL)
-        (self.repo / "app" / "src" / "impl.ts").write_text("export const x = 1;\n")
+        (self.repo / "app" / "src" / "impl.ts").write_text("export function buildApp(opts: unknown) { return opts; }\n")
         (self.repo / "docs" / "specs").mkdir(parents=True)
         self.spec_path = self.repo / "docs" / "specs" / "issue-35.md"
         self.spec_path.write_text(SPEC_TEXT)
@@ -277,8 +278,8 @@ class TestRedCastNoRevertBetweenAttempts(_RedPhaseBase):
                 "prompt": prompt,
             })
             if n == 0:
-                old.write_text(OLD_ORIGINAL + "test('x', () => {\n" + CAST_LINE + "});\n")
-                new.write_text("test('n', () => {\n" + CAST_LINE + "});\n")
+                old.write_text(OLD_ORIGINAL + IMPL_IMPORT + "test('x', () => {\n" + CAST_LINE + "});\n")
+                new.write_text(IMPL_IMPORT + "test('n', () => {\n" + CAST_LINE + "});\n")
             else:
                 old.write_text(OLD_ORIGINAL + "test('x', () => {\n  buildApp({ db });\n});\n")
             return 0, "done"
@@ -301,9 +302,9 @@ class TestRedCastNoRevertBetweenAttempts(_RedPhaseBase):
         def coder(prompt: str, log_path: str):
             calls.append(prompt)
             (self.repo / "app" / "test" / "old.test.ts").write_text(
-                OLD_ORIGINAL + "test('x', () => {\n" + CAST_LINE + "});\n")
+                OLD_ORIGINAL + IMPL_IMPORT + "test('x', () => {\n" + CAST_LINE + "});\n")
             (self.repo / "app" / "test" / "new.test.ts").write_text(
-                "test('n', () => {\n" + CAST_LINE + "});\n")
+                IMPL_IMPORT + "test('n', () => {\n" + CAST_LINE + "});\n")
             return 0, "done"
 
         result = self._red(coder, self._run_cmd(""), lambda p: "abortar")
@@ -315,7 +316,7 @@ class TestRedCastNoRevertBetweenAttempts(_RedPhaseBase):
     def _always_cast_coder(self):
         def coder(prompt: str, log_path: str):
             (self.repo / "app" / "test" / "new.test.ts").write_text(
-                "test('n', () => {\n" + CAST_LINE + "});\n")
+                IMPL_IMPORT + "test('n', () => {\n" + CAST_LINE + "});\n")
             return 0, "done"
         return coder
 
