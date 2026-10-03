@@ -10,6 +10,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
@@ -17,6 +18,19 @@ from typing import Any, Callable
 sys.path.insert(0, str(Path(__file__).parent))
 
 from take_agent import parse_spec_markdown, set_status, mark_progress, unmark_progress
+
+
+@dataclass(frozen=True)
+class CastCheckResult:
+    """
+    Result of a cast check operation.
+    
+    Attributes:
+        rejected: The line that should be rejected, or None if no rejection
+        warnings: Tuple of warning messages (empty tuple by default)
+    """
+    rejected: str | None = None
+    warnings: tuple[str, ...] = ()
 
 
 # Empty run detection patterns (compiled regexes, anchored at line start)
@@ -41,6 +55,30 @@ MAX_DESVIOS_PER_PHASE = 3
 
 # Sentinel value to signal back-to-RED from GREEN
 BACK_TO_RED = "back_to_red"
+
+# Known external callees (test framework functions and matchers).
+# This is the explicit boundary between "known external" and "suspicious".
+# Entries are the LAST SEGMENT of the callee (e.g., "mockResolvedValue" matches "vi.mocked(foo).mockResolvedValue").
+# When a callee's last segment is in this set, it's accepted without warning.
+# To add new entries, update this set AND document in AGENTS.md.
+KNOWN_EXTERNAL_CALLEES = frozenset({
+    "mockResolvedValue",
+    "mockResolvedValueOnce",
+    "mockRejectedValue",
+    "mockRejectedValueOnce",
+    "mockReturnValue",
+    "mockReturnValueOnce",
+    "mockImplementation",
+    "mockImplementationOnce",
+    "toEqual",
+    "toStrictEqual",
+    "toBe",
+    "toMatchObject",
+    "toHaveBeenCalledWith",
+    "toHaveBeenLastCalledWith",
+    "spyOn",
+    "mocked",
+})
 
 
 def is_dependency_infra_file(path: str) -> bool:
@@ -73,6 +111,187 @@ def is_dependency_infra_file(path: str) -> bool:
     return False
 
 
+def _find_unmatched_opener(text: str, pos: int) -> int:
+    """
+    Walk backwards from pos (inclusive) balancing (), {} and [].
+    
+    Returns the index of the nearest opener with no matching closer between it
+    and pos, or -1 if there is none.
+    """
+    depth = 0
+    while pos >= 0:
+        char = text[pos]
+        if char in ')}]':
+            depth += 1
+        elif char in '({[':
+            if depth == 0:
+                return pos
+            depth -= 1
+        pos -= 1
+    return -1
+
+
+def _extract_callee(text: str, call_paren_pos: int) -> str:
+    """
+    Extract the callee chain immediately before the '(' at call_paren_pos.
+    
+    The chain is made of identifier characters, dots and balanced (...) / [...]
+    groups (e.g. vi.mocked(fn).mockResolvedValue). It stops at any other
+    character, including the '(' of an enclosing call, so that in
+    expect(buildApp(...)) the callee is buildApp, not expect(buildApp.
+    """
+    end = call_paren_pos - 1
+    while end >= 0 and text[end].isspace():
+        end -= 1
+    start = end
+    while start >= 0:
+        char = text[start]
+        if char.isalnum() or char in '_.$':
+            start -= 1
+        elif char in ')]':
+            opener = _find_unmatched_opener(text, start - 1)
+            if opener < 0 or text[opener] != ('(' if char == ')' else '['):
+                break
+            start = opener - 1
+        else:
+            break
+    return text[start+1:end+1].strip()
+
+
+def classify_callee(
+    file_path: str,
+    trigger_line: str,
+    symbol_map: dict[str, str],
+    repo_root: str
+) -> CastCheckResult:
+    """
+    Classify a cast by balancing braces/parens and checking the callee.
+    
+    Reads the file, finds trigger_line, balances backwards from the closing brace
+    to determine if the cast object is a function argument, and classifies the callee.
+    
+    Classification rules (in order):
+    1. Callee in symbol_map (imported from impl_file) → REJECT
+    2. Last segment of callee in KNOWN_EXTERNAL_CALLEES → ACCEPT (no warning)
+    3. Base identifier of callee (first dotted segment) in symbol_map → REJECT
+    4. Callee not resolvable → ACCEPT with warning
+    
+    Non-argument contexts (=, :, return, )) are always accepted without warning.
+    Unbalanced braces → ACCEPT with warning.
+    
+    Args:
+        file_path: Test file path (relative to repo_root)
+        trigger_line: The line containing the cast pattern
+        symbol_map: Map of symbol → impl_file (from build_symbol_to_impl_map)
+        repo_root: Absolute path to repository root
+    
+    Returns:
+        CastCheckResult with rejected line (if any) and warnings
+    """
+    abs_path = Path(repo_root) / file_path
+    if not abs_path.exists():
+        return CastCheckResult(
+            rejected=None,
+            warnings=(f"File not found: {file_path}",)
+        )
+    
+    content = abs_path.read_text()
+    lines = content.splitlines(keepends=True)
+    
+    # Find the trigger line
+    trigger_idx = None
+    for i, line in enumerate(lines):
+        if line.rstrip() == trigger_line.rstrip():
+            trigger_idx = i
+            break
+    
+    if trigger_idx is None:
+        return CastCheckResult(
+            rejected=None,
+            warnings=(f"Trigger line not found in {file_path}",)
+        )
+    
+    full_text = ''.join(lines)
+    
+    # Find the "} as" in the trigger line
+    trigger_pos = sum(len(lines[j]) for j in range(trigger_idx))
+    closing_brace_match = re.search(r'\}\s+as\s+', lines[trigger_idx])
+    if not closing_brace_match:
+        return CastCheckResult(
+            rejected=None,
+            warnings=(f"No '}} as' pattern in trigger line: {file_path}:{trigger_idx+1}",)
+        )
+    closing_brace_pos = trigger_pos + closing_brace_match.start()
+    location = f"{file_path}:{trigger_idx+1}"
+    unbalanced = CastCheckResult(rejected=None, warnings=(f"Unbalanced braces in {location}",))
+    accepted = CastCheckResult(rejected=None, warnings=())
+    
+    # The nearest unmatched opener before the closing brace must be the matching '{'
+    opening_brace_pos = _find_unmatched_opener(full_text, closing_brace_pos - 1)
+    if opening_brace_pos < 0 or full_text[opening_brace_pos] != '{':
+        return unbalanced
+    
+    # Skip whitespace backwards from the opening brace
+    prev_pos = opening_brace_pos - 1
+    while prev_pos >= 0 and full_text[prev_pos].isspace():
+        prev_pos -= 1
+    if prev_pos < 0:
+        return accepted
+    prev_char = full_text[prev_pos]
+    
+    # Non-argument contexts: assignment, property value, grouping, return
+    if prev_char in ('=', ':', ')'):
+        return accepted
+    word_start = prev_pos
+    while word_start >= 0 and (full_text[word_start].isalnum() or full_text[word_start] == '_'):
+        word_start -= 1
+    if full_text[word_start+1:prev_pos+1] == 'return':
+        return accepted
+    
+    if prev_char == '(':
+        call_paren_pos = prev_pos
+    elif prev_char == ',':
+        # A comma separates call arguments or object/array elements: the nearest
+        # unmatched opener before it tells which one.
+        opener_pos = _find_unmatched_opener(full_text, prev_pos - 1)
+        if opener_pos < 0:
+            return unbalanced
+        if full_text[opener_pos] != '(':
+            return accepted
+        call_paren_pos = opener_pos
+    else:
+        return accepted
+    
+    callee = _extract_callee(full_text, call_paren_pos)
+    if not callee:
+        return CastCheckResult(
+            rejected=None,
+            warnings=(f"Could not extract callee from {location}",)
+        )
+    
+    # Rule 1: callee imported from an impl_file
+    if callee in symbol_map:
+        return CastCheckResult(rejected=trigger_line.rstrip(), warnings=())
+    
+    # Rule 2: last segment is a known external function (wins over the base identifier)
+    if callee.split('.')[-1] in KNOWN_EXTERNAL_CALLEES:
+        return accepted
+    
+    # Rule 3: method of an imported symbol (base identifier is in the symbol map)
+    base_match = re.match(r'[A-Za-z_$][\w$]*', callee)
+    if base_match and base_match.group(0) in symbol_map:
+        return CastCheckResult(rejected=trigger_line.rstrip(), warnings=())
+    
+    # Rule 4: callee not resolvable - accept with warning
+    return CastCheckResult(
+        rejected=None,
+        warnings=(
+            f"Callee '{callee}' not resolvable in {location} "
+            f"(not in symbol map and not a known external function)",
+        )
+    )
+
+
 def extract_ts_error_type_name(error_code: str, error_message: str) -> str | None:
     """
     Extract the named type from a TypeScript error message.
@@ -96,6 +315,66 @@ def extract_ts_error_type_name(error_code: str, error_message: str) -> str | Non
     if pattern := patterns.get(error_code):
         if match := re.search(pattern, error_message):
             return match.group(1)
+    
+    return None
+
+
+def resolve_import_to_impl_file(
+    test_file: str,
+    import_path: str,
+    impl_files: list[str],
+    repo_root: str
+) -> str | None:
+    """
+    Resolve a single import path to an impl_file.
+    
+    Resolves relative imports with extension resolution (.js -> .ts, no ext -> .ts).
+    
+    Args:
+        test_file: Test file path (relative to repo_root)
+        import_path: Import path string from test file
+        impl_files: List of implementation file paths (relative to repo_root)
+        repo_root: Absolute path to repository root
+    
+    Returns:
+        The matching impl_file path, or None if no match
+    """
+    # Skip non-relative imports (node_modules)
+    if not import_path.startswith('.'):
+        return None
+    
+    test_path = Path(repo_root) / test_file
+    test_dir = test_path.parent
+    
+    # Resolve relative path
+    resolved = (test_dir / import_path).resolve()
+    
+    # Try multiple extensions for extension resolution
+    # .js -> .ts, no ext -> .ts
+    candidates = []
+    
+    if resolved.suffix == ".js":
+        # Try replacing .js with .ts
+        candidates.append(resolved.with_suffix(".ts"))
+    elif resolved.suffix == "":
+        # Try adding .ts extension
+        candidates.append(resolved.with_suffix(".ts"))
+    else:
+        # Use as-is
+        candidates.append(resolved)
+    
+    # Check if any candidate matches an impl_file
+    for candidate in candidates:
+        # Normalize path to be relative to repo_root
+        try:
+            rel_path = candidate.relative_to(Path(repo_root))
+            normalized = str(rel_path).replace("\\", "/")
+            
+            if normalized in impl_files:
+                return normalized
+        except ValueError:
+            # Not relative to repo_root, skip
+            continue
     
     return None
 
@@ -144,43 +423,10 @@ def test_imports_impl_file(test_file: str, impl_files: list[str], repo_root: str
     # Flatten match groups (each match is a tuple of 3 groups, only one is non-empty)
     import_paths = [m for group in matches for m in group if m]
     
-    # Resolve each import path
-    test_dir = test_path.parent
-    
+    # Resolve each import path using resolve_import_to_impl_file
     for import_path in import_paths:
-        # Skip non-relative imports (node_modules)
-        if not import_path.startswith('.'):
-            continue
-        
-        # Resolve relative path
-        resolved = (test_dir / import_path).resolve()
-        
-        # Try multiple extensions for extension resolution
-        # .js -> .ts, no ext -> .ts
-        candidates = []
-        
-        if resolved.suffix == ".js":
-            # Try replacing .js with .ts
-            candidates.append(resolved.with_suffix(".ts"))
-        elif resolved.suffix == "":
-            # Try adding .ts extension
-            candidates.append(resolved.with_suffix(".ts"))
-        else:
-            # Use as-is
-            candidates.append(resolved)
-        
-        # Check if any candidate matches an impl_file
-        for candidate in candidates:
-            # Normalize path to be relative to repo_root
-            try:
-                rel_path = candidate.relative_to(Path(repo_root))
-                normalized = str(rel_path).replace("\\", "/")
-                
-                if normalized in impl_files:
-                    return True
-            except ValueError:
-                # Not relative to repo_root, skip
-                continue
+        if resolve_import_to_impl_file(test_file, import_path, impl_files, repo_root):
+            return True
     
     return False
 
@@ -382,6 +628,121 @@ def is_signature_error_acceptable(error_code: str, error_line: str, test_file: s
     return False
 
 
+def build_symbol_to_impl_map(
+    test_file: str,
+    impl_files: list[str],
+    repo_root: str
+) -> dict[str, str]:
+    """
+    Build a map of local symbol names to impl_file paths.
+    
+    Parses static and dynamic destructured imports from test file.
+    Maps each imported symbol's local name to its impl_file.
+    
+    Excludes:
+    - Namespace imports (import * as x)
+    - Default imports (import x)
+    - Non-relative imports (e.g. 'vitest')
+    - Imports that don't resolve to any impl_file
+    
+    Args:
+        test_file: Test file path (relative to repo_root)
+        impl_files: List of implementation file paths (relative to repo_root)
+        repo_root: Repository root path
+    
+    Returns:
+        Dict mapping local symbol name to impl_file path
+    """
+    test_path = Path(repo_root) / test_file
+    
+    if not test_path.exists():
+        return {}
+    
+    try:
+        content = test_path.read_text(encoding="utf-8")
+    except Exception:
+        return {}
+    
+    symbol_map = {}
+    
+    # Parse static imports: import { x, y as z } from 'path'
+    # Pattern captures: (1) import specifiers (2) path
+    static_import_pattern = re.compile(
+        r"""
+        import\s+
+        \{\s*
+        ([^}]+)  # import specifiers
+        \}\s*
+        from\s+['"]([^'"]+)['"]
+        """,
+        re.VERBOSE
+    )
+    
+    for match in static_import_pattern.finditer(content):
+        specifiers_str = match.group(1)
+        import_path = match.group(2)
+        
+        # Resolve import path
+        impl_file = resolve_import_to_impl_file(test_file, import_path, impl_files, repo_root)
+        if not impl_file:
+            continue
+        
+        # Parse specifiers: 'a, b as c, d'
+        # Split by comma and handle aliases
+        for spec in specifiers_str.split(','):
+            spec = spec.strip()
+            if ' as ' in spec:
+                # Aliased import: 'original as local'
+                parts = spec.split(' as ')
+                local_name = parts[1].strip()
+            else:
+                # Direct import: 'name'
+                local_name = spec
+            
+            if local_name:
+                symbol_map[local_name] = impl_file
+    
+    # Parse dynamic imports: const { x, y as z } = await import('path')
+    # Pattern captures: (1) destructuring pattern (2) path
+    dynamic_import_pattern = re.compile(
+        r"""
+        \{\s*
+        ([^}]+)  # destructuring pattern
+        \}\s*
+        =\s*
+        (?:await\s+)?
+        import\s*\(\s*['"]([^'"]+)['"]\s*\)
+        """,
+        re.VERBOSE
+    )
+    
+    for match in dynamic_import_pattern.finditer(content):
+        destructure_str = match.group(1)
+        import_path = match.group(2)
+        
+        # Resolve import path
+        impl_file = resolve_import_to_impl_file(test_file, import_path, impl_files, repo_root)
+        if not impl_file:
+            continue
+        
+        # Parse destructuring: 'a, b: c, d'
+        # Dynamic imports use colon for renaming
+        for spec in destructure_str.split(','):
+            spec = spec.strip()
+            if ':' in spec:
+                # Renamed: 'original: local'
+                parts = spec.split(':')
+                local_name = parts[1].strip()
+            else:
+                # Direct: 'name'
+                local_name = spec
+            
+            if local_name:
+                symbol_map[local_name] = impl_file
+    
+    return symbol_map
+
+
 def get_new_lines(repo_root: str, file: str, run_cmd: Callable) -> list[str]:
     """
     Get new lines in a file.
@@ -437,7 +798,12 @@ def get_new_lines(repo_root: str, file: str, run_cmd: Callable) -> list[str]:
         return new_lines
 
 
-def detect_full_arg_cast(repo_root: str, test_files: list[str], run_cmd: Callable) -> str | None:
+def detect_full_arg_cast(
+    repo_root: str,
+    test_files: list[str],
+    run_cmd: Callable,
+    impl_files: list[str] | None = None
+) -> CastCheckResult:
     """
     Detect prohibited type casts over full arguments in test files.
     
@@ -446,17 +812,20 @@ def detect_full_arg_cast(repo_root: str, test_files: list[str], run_cmd: Callabl
     - } as any)
     - } as unknown as <ident>)
     
-    These patterns indicate casting the entire argument object to bypass type checks,
-    which is prohibited. Property casts (e.g. 'db: mockDb as never,') and variable
-    casts (e.g. 'const x = fakeDb as never;') are allowed.
+    With impl_files=None: rejects all cast patterns (legacy #35 behavior).
+    With impl_files: balances braces/parens, classifies callee:
+      - Callee imported from impl_file → REJECT
+      - Callee is known external (mock/matcher) → ACCEPT
+      - Callee not resolvable → ACCEPT with warning
     
     Args:
         repo_root: Repository root path
         test_files: List of test file paths (relative to repo_root)
         run_cmd: Command runner function
+        impl_files: Optional list of impl file paths (enables callee classification)
     
     Returns:
-        The first problematic line found, or None if no issues
+        CastCheckResult with rejected line (if any) and warnings tuple
     """
     import re
     
@@ -467,15 +836,42 @@ def detect_full_arg_cast(repo_root: str, test_files: list[str], run_cmd: Callabl
         r"\}\s+as\s+unknown\s+as\s+\w+\s*\)",
     ]
     
+    # Legacy behavior (impl_files=None): reject all cast patterns
+    if impl_files is None:
+        for test_file in test_files:
+            new_lines = get_new_lines(repo_root, test_file, run_cmd)
+            
+            for line in new_lines:
+                for pattern in patterns:
+                    if re.search(pattern, line):
+                        return CastCheckResult(rejected=line, warnings=())
+        
+        return CastCheckResult(rejected=None, warnings=())
+    
+    # New behavior: build symbol map once per file and classify
+    all_warnings = []
+    
     for test_file in test_files:
         new_lines = get_new_lines(repo_root, test_file, run_cmd)
+        
+        # Build symbol map for this test file once
+        symbol_map = build_symbol_to_impl_map(test_file, impl_files, repo_root)
         
         for line in new_lines:
             for pattern in patterns:
                 if re.search(pattern, line):
-                    return line
+                    # Classify this cast
+                    result = classify_callee(test_file, line, symbol_map, repo_root)
+                    
+                    if result.rejected:
+                        # Return immediately on first rejection
+                        return result
+                    
+                    # Accumulate warnings
+                    if result.warnings:
+                        all_warnings.extend(result.warnings)
     
-    return None
+    return CastCheckResult(rejected=None, warnings=tuple(all_warnings))
 
 
 def check_test_files_static(repo_root: str, test_files: list[str], run_cmd: Callable, impl_files: list[str] | None = None) -> str | None:
@@ -1391,20 +1787,44 @@ def run_red_phase(
                     return False
                 break
         
-        # Check for prohibited full-argument casts (D3)
+        # Check for prohibited full-argument casts
         changed_test_files = [f for f in changed if is_test_file(f)]
         if changed_test_files:
-            cast_line = detect_full_arg_cast(repo_root, changed_test_files, run_cmd)
-            if cast_line:
+            cast_result = detect_full_arg_cast(
+                repo_root,
+                changed_test_files,
+                run_cmd,
+                impl_files
+            )
+            
+            # Write all warnings to task log
+            if cast_result.warnings:
+                for warning in cast_result.warnings:
+                    with open(log_path, "a") as log:
+                        log.write(f"\n{warning}\n")
+            
+            # Print warning summary once (only if we have warnings)
+            if cast_result.warnings and attempt == 0:
+                # Extract file and line from first warning using regex
+                first_warning = cast_result.warnings[0]
+                location_match = re.search(r'([^\s:]+:\d+)', first_warning)
+                if location_match:
+                    location = location_match.group(1)
+                    warning_msg = f"no pude determinar el callee del cast en {location}, revisalo en el diff"
+                    if len(cast_result.warnings) > 1:
+                        warning_msg += f" (+{len(cast_result.warnings) - 1} más en el log de la tarea)"
+                    print_fn(warning_msg)
+            
+            if cast_result.rejected:
                 print_fn(f"Error: cast prohibido sobre argumento completo detectado:")
-                print_fn(f"  {cast_line}")
+                print_fn(f"  {cast_result.rejected}")
                 print_fn("No uses casts '} as never)', '} as any)' o '} as unknown as X)' sobre el argumento completo.")
                 
                 # Do NOT revert between attempts (D2): the coder fixes in place.
                 # Only revert on abort or exhausted attempts.
                 if attempt < max_attempts - 1:
                     print_fn("Reintentando RED...\n")
-                    last_feedback = f"Cast prohibido detectado en línea:\n\n  {cast_line}\n\nNo uses casts '}} as never)', '}} as any)' o '}} as unknown as X)' sobre el argumento completo. Corregí los archivos de test existentes."
+                    last_feedback = f"Cast prohibido detectado en línea:\n\n  {cast_result.rejected}\n\nNo uses casts '}} as never)', '}} as any)' o '}} as unknown as X)' sobre el argumento completo. Corregí los archivos de test existentes."
                     attempt += 1
                     continue
                 else:
