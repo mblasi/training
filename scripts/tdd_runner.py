@@ -17,7 +17,7 @@ from typing import Any, Callable
 # Add scripts dir to path for imports
 sys.path.insert(0, str(Path(__file__).parent))
 
-from take_agent import parse_spec_markdown, set_status, mark_progress, unmark_progress
+from take_agent import parse_spec_markdown, set_status, mark_progress, unmark_progress, _escape_cell
 
 
 @dataclass(frozen=True)
@@ -1315,17 +1315,17 @@ def append_decision_to_spec(
     new_rows = []
     for decision in spec["decisions"]:
         id_str = decision["id"]
-        topic = decision["topic"].replace("|", "\\|")
-        options_str = ", ".join(decision["options"]).replace("|", "\\|")
-        chosen = decision["chosen"].replace("|", "\\|")
-        rationale = decision["rationale"].replace("|", "\\|")
+        topic = _escape_cell(decision["topic"])
+        options_str = _escape_cell(", ".join(decision["options"]))
+        chosen = _escape_cell(decision["chosen"])
+        rationale = _escape_cell(decision["rationale"])
         new_rows.append(f"| {id_str} | {topic} | {options_str} | {chosen} | {rationale} |")
     
     new_table = "\n".join(new_rows)
     
     content = re.sub(
         table_pattern,
-        rf"\1{new_table}\3",
+        lambda m: m.group(1) + new_table + m.group(3),
         content,
         flags=re.DOTALL
     )

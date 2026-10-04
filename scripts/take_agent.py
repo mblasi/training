@@ -20,6 +20,122 @@ from agent_core import (
 )
 
 
+def _escape_cell(text: str) -> str:
+    """
+    Escape text for a Markdown table cell.
+    
+    Converts:
+    1. Backslash -> double backslash
+    2. Pipe -> backslash-pipe
+    3. Any newline (LF, CRLF, CR) -> space
+    
+    Order is critical: backslash must be escaped before pipe to avoid
+    re-escaping the backslash of the escaped pipe.
+    
+    Args:
+        text: Raw text to escape
+    
+    Returns:
+        Escaped text safe for Markdown table cell
+    """
+    # Step 1: Escape backslashes
+    result = text.replace("\\", "\\\\")
+    
+    # Step 2: Escape pipes
+    result = result.replace("|", "\\|")
+    
+    # Step 3: Normalize newlines to space
+    # First replace CRLF with a single newline
+    result = result.replace("\r\n", "\n")
+    # Then replace remaining CR with newline
+    result = result.replace("\r", "\n")
+    # Finally replace all newlines with space
+    result = result.replace("\n", " ")
+    
+    return result
+
+
+def _split_row(row: str) -> list[str]:
+    """
+    Split a Markdown table row into cells, handling escaped pipes.
+    
+    Tokenizes character by character:
+    - Backslash-backslash -> single backslash
+    - Backslash-pipe -> literal pipe (not a separator)
+    - Backslash followed by any other char -> conserve backslash literal
+    - Pipe -> cell separator
+    - All other chars -> copy as-is
+    
+    Removes exactly one space of padding from start and end of each cell
+    (Markdown table format convention). Discards empty initial and final
+    cells (border pipes).
+    
+    Args:
+        row: Markdown table row string (e.g. "| foo | bar |")
+    
+    Returns:
+        List of unescaped cell contents
+    """
+    cells = []
+    current_cell = []
+    i = 0
+    
+    while i < len(row):
+        char = row[i]
+        
+        if char == "\\":
+            # Check next char
+            if i + 1 < len(row):
+                next_char = row[i + 1]
+                if next_char == "\\":
+                    # Backslash-backslash -> single backslash
+                    current_cell.append("\\")
+                    i += 2
+                    continue
+                elif next_char == "|":
+                    # Backslash-pipe -> literal pipe
+                    current_cell.append("|")
+                    i += 2
+                    continue
+            # Backslash followed by anything else (or end of string)
+            # -> conserve backslash literal
+            current_cell.append("\\")
+            i += 1
+        elif char == "|":
+            # Pipe is cell separator
+            cell_content = "".join(current_cell)
+            # Remove exactly one space of padding from start and end
+            if cell_content.startswith(" "):
+                cell_content = cell_content[1:]
+            if cell_content.endswith(" "):
+                cell_content = cell_content[:-1]
+            cells.append(cell_content)
+            current_cell = []
+            i += 1
+        else:
+            # Regular character
+            current_cell.append(char)
+            i += 1
+    
+    # Add last cell if any
+    if current_cell or cells:
+        cell_content = "".join(current_cell)
+        # Remove exactly one space of padding from start and end
+        if cell_content.startswith(" "):
+            cell_content = cell_content[1:]
+        if cell_content.endswith(" "):
+            cell_content = cell_content[:-1]
+        cells.append(cell_content)
+    
+    # Discard empty initial and final cells (border pipes)
+    if cells and not cells[0]:
+        cells = cells[1:]
+    if cells and not cells[-1]:
+        cells = cells[:-1]
+    
+    return cells
+
+
 def load_issue(issue_num: int, runner: Callable[[list[str]], subprocess.CompletedProcess] | None = None) -> dict[str, Any]:
     """
     Load full issue details from GitHub.
@@ -244,10 +360,10 @@ def render_spec_markdown(spec: dict[str, Any], issue: dict[str, Any]) -> str:
     lines.append("|----|-------|----------|---------|-----------|")
     for decision in spec["decisions"]:
         id_str = decision["id"]
-        topic = decision["topic"].replace("|", "\\|")
-        options_str = ", ".join(decision["options"]).replace("|", "\\|")
-        chosen = decision["chosen"].replace("|", "\\|")
-        rationale = decision["rationale"].replace("|", "\\|")
+        topic = _escape_cell(decision["topic"])
+        options_str = _escape_cell(", ".join(decision["options"]))
+        chosen = _escape_cell(decision["chosen"])
+        rationale = _escape_cell(decision["rationale"])
         lines.append(f"| {id_str} | {topic} | {options_str} | {chosen} | {rationale} |")
     lines.append("")
     
@@ -365,14 +481,14 @@ def parse_spec_markdown(md: str) -> tuple[dict[str, Any], dict[str, Any], dict[s
         table_rows = decisions_match.group(1).strip().split("\n")
         for row in table_rows:
             if row.strip():
-                parts = [p.strip() for p in row.split("|")]
-                if len(parts) >= 6:  # | ID | Topic | ... |
+                parts = _split_row(row)
+                if len(parts) >= 5:  # ID | Topic | Opciones | Elegida | Rationale
                     spec["decisions"].append({
-                        "id": parts[1],
-                        "topic": parts[2],
-                        "options": [o.strip() for o in parts[3].split(",")],
-                        "chosen": parts[4],
-                        "rationale": parts[5]
+                        "id": parts[0],
+                        "topic": parts[1],
+                        "options": [o.strip() for o in parts[2].split(",")],
+                        "chosen": parts[3],
+                        "rationale": parts[4]
                     })
     
     # Tasks (parse ### headings and checkboxes)
