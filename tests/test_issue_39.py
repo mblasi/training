@@ -552,6 +552,70 @@ None.
             temp_path.unlink()
 
 
+class TestParserRejectsMalformedRows(unittest.TestCase):
+    """parse_spec_markdown must fail loudly on malformed decision rows."""
+
+    HEADER = (
+        "---\nissue: 999\nstatus: draft\ntest_command: echo test\n---\n\n"
+        "## Resumen\n\nResumen.\n\n## Decisiones de diseño\n\n"
+        "| ID | Tema | Opciones | Elegida | Justificación |\n"
+        "|----|------|----------|---------|---------------|\n"
+    )
+    FOOTER = "\n\n## Archivos afectados\n\nNinguno.\n\n## Tareas\n\nNinguna.\n"
+
+    def _build(self, rows: str) -> str:
+        return self.HEADER + rows + self.FOOTER
+
+    def test_row_with_four_cells_raises_value_error(self):
+        md = self._build("| D1 | Tema | A, B | Elegida |")
+        with self.assertRaises(ValueError) as ctx:
+            parse_spec_markdown(md)
+        msg = str(ctx.exception)
+        self.assertIn("D1", msg)
+        self.assertIn("celdas", msg)
+        self.assertIn("4", msg)
+        self.assertIn("5", msg)
+
+    def test_row_with_six_cells_raises_value_error(self):
+        md = self._build("| D2 | Tema | A, B | elegida con | pipe sin escapar | razon |")
+        with self.assertRaises(ValueError) as ctx:
+            parse_spec_markdown(md)
+        msg = str(ctx.exception)
+        self.assertIn("D2", msg)
+        self.assertIn("celdas", msg)
+        self.assertIn("6", msg)
+        self.assertIn("5", msg)
+
+    def test_row_with_five_cells_still_parses(self):
+        md = self._build("| D1 | Tema | A, B | A | porque si |")
+        _, spec, _ = parse_spec_markdown(md)
+        self.assertEqual(len(spec["decisions"]), 1)
+        self.assertEqual(spec["decisions"][0]["id"], "D1")
+        self.assertEqual(spec["decisions"][0]["rationale"], "porque si")
+
+    def test_blank_rows_between_decisions_are_skipped(self):
+        rows = (
+            "| D1 | Tema | A, B | A | uno |\n"
+            "\n"
+            "   \n"
+            "| D2 | Tema | A, B | B | dos |"
+        )
+        _, spec, _ = parse_spec_markdown(self._build(rows))
+        self.assertEqual([d["id"] for d in spec["decisions"]], ["D1", "D2"])
+
+    def test_empty_table_yields_no_decisions_and_no_error(self):
+        _, spec, _ = parse_spec_markdown(self._build(""))
+        self.assertEqual(spec["decisions"], [])
+
+    def test_error_message_includes_row_prefix(self):
+        long_row = "| D7 | " + "x" * 120 + " | solo | tres |"
+        with self.assertRaises(ValueError) as ctx:
+            parse_spec_markdown(self._build(long_row))
+        msg = str(ctx.exception)
+        self.assertIn(long_row[:80], msg)
+        self.assertNotIn(long_row[:81], msg)
+
+
 class TestAllRepoSpecsParse(unittest.TestCase):
     """Test that all existing specs in docs/specs/ parse without exception."""
     
@@ -596,6 +660,36 @@ class TestAllRepoSpecsParse(unittest.TestCase):
                 "Some specs have decisions with chosen ending in backslash:\n" +
                 "\n".join(failed_specs)
             )
+
+
+    def test_every_repo_spec_row_becomes_a_decision(self):
+        """el numero de filas | Dn | de la seccion Decisiones de diseño (contadas
+        por lineas, sin usar el parser) iguala len(spec["decisions"])"""
+        import re
+
+        specs_dir = repo_root / "docs" / "specs"
+        self.assertTrue(specs_dir.exists(), f"Specs directory not found: {specs_dir}")
+        spec_files = sorted(specs_dir.glob("*.md"))
+        self.assertGreater(len(spec_files), 0, "No spec files found in docs/specs/")
+
+        for spec_file in spec_files:
+            with self.subTest(spec=spec_file.name):
+                content = spec_file.read_text(encoding="utf-8")
+                in_section = False
+                expected = 0
+                for line in content.split("\n"):
+                    if line.startswith("## "):
+                        in_section = line.strip() == "## Decisiones de diseño"
+                        continue
+                    if in_section and re.match(r"\| D[A-Za-z]*\d+[A-Za-z]* ", line):
+                        expected += 1
+                _, spec, _ = parse_spec_markdown(content)
+                self.assertEqual(
+                    len(spec["decisions"]),
+                    expected,
+                    f"{spec_file.name}: {expected} filas en la tabla, "
+                    f"{len(spec['decisions'])} decisiones parseadas",
+                )
 
 
 if __name__ == "__main__":

@@ -480,16 +480,25 @@ def parse_spec_markdown(md: str) -> tuple[dict[str, Any], dict[str, Any], dict[s
     if decisions_match:
         table_rows = decisions_match.group(1).strip().split("\n")
         for row in table_rows:
+            if row.lstrip().startswith("#"):
+                # Empty table: the regex above captured the next section heading
+                break
             if row.strip():
                 parts = _split_row(row)
-                if len(parts) >= 5:  # ID | Topic | Opciones | Elegida | Rationale
-                    spec["decisions"].append({
-                        "id": parts[0],
-                        "topic": parts[1],
-                        "options": [o.strip() for o in parts[2].split(",")],
-                        "chosen": parts[3],
-                        "rationale": parts[4]
-                    })
+                if len(parts) != 5:  # ID | Topic | Opciones | Elegida | Rationale
+                    decision_id = parts[0] if parts and parts[0] else "?"
+                    raise ValueError(
+                        f"Fila de decisiones mal formada ({decision_id}): "
+                        f"se encontraron {len(parts)} celdas, se esperaban 5. "
+                        f"Fila: {row.strip()[:80]}"
+                    )
+                spec["decisions"].append({
+                    "id": parts[0],
+                    "topic": parts[1],
+                    "options": [o.strip() for o in parts[2].split(",")],
+                    "chosen": parts[3],
+                    "rationale": parts[4]
+                })
     
     # Tasks (parse ### headings and checkboxes)
     task_pattern = r"### ([A-Z0-9]+): (.*?)\n\n(.*?)(?=\n###|\Z)"
