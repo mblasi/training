@@ -4,11 +4,11 @@
 
 ## 🚧 En curso (WIP)
 
-- [ ] [#39](https://github.com/mblasi/training/issues/39) Harness: append_decision_to_spec rompe con barras invertidas en el texto de una decision · fix · @mblasi
+_Nada por ahora._
 
 ## 👀 En revisión
 
-_Nada por ahora._
+- [ ] [#39](https://github.com/mblasi/training/issues/39) Harness: append_decision_to_spec rompe con barras invertidas en el texto de una decision · fix · @mblasi
 
 ## 📋 Pendiente
 
