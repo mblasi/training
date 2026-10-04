@@ -70,7 +70,7 @@ Definir _escape_cell y _split_row en take_agent.py, integrarlas en render_spec_m
 - `scripts/tdd_runner.py`
 
 **Progreso:**
-- [ ] RED: tests escritos y fallan
+- [x] RED: tests escritos y fallan
 - [ ] GREEN: tests pasan
 - [ ] REFACTOR: código limpio
 
