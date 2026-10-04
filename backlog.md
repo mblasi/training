@@ -8,7 +8,7 @@ _Nada por ahora._
 
 ## 👀 En revisión
 
-- [ ] [#39](https://github.com/mblasi/training/issues/39) Harness: append_decision_to_spec rompe con barras invertidas en el texto de una decision · fix · @mblasi
+_Nada por ahora._
 
 ## 📋 Pendiente
 
@@ -20,6 +20,7 @@ _Nada por ahora._
 
 ## ✅ Hecho
 
+- [x] [#39](https://github.com/mblasi/training/issues/39) Harness: append_decision_to_spec rompe con barras invertidas en el texto de una decision · fix · @mblasi
 - [x] [#37](https://github.com/mblasi/training/issues/37) Harness: el detector de casts rechaza casts legítimos sobre valores de mocks (falso positivo) · fix · @mblasi
 - [x] [#11](https://github.com/mblasi/training/issues/11) Auth con Firebase (Google + email/password) en api, admin y mobile · feat · @mblasi
 - [x] [#35](https://github.com/mblasi/training/issues/35) Harness: RED rechaza tests legítimos cuando cambia una firma de producción (TS2353) y el revert descarta ediciones correctas · fix · @mblasi
