@@ -1,6 +1,6 @@
 # Backlog
 
-> Generado automáticamente desde GitHub Issues por `scripts/backlog.py render`. No editar a mano.
+> Generado automáticamente desde GitHub Issues por `harness render`. No editar a mano.
 
 ## 🚧 En curso (WIP)
 

@@ -1,0 +1,27 @@
+[project]
+repo = "mblasi/training"
+
+[taxonomy]
+areas = ["web", "api", "agents", "admin", "infra"]
+
+[[taxonomy.milestones]]
+title = "Fase 0 - Fundaciones"
+
+[[taxonomy.milestones]]
+title = "Fase 1 - MVP individual"
+
+[[taxonomy.milestones]]
+title = "Fase 2 - Retención y comunidad"
+
+[[taxonomy.milestones]]
+title = "Fase 3 - Calidad y escala"
+
+[stacks.node]
+preset = "node-pnpm"
+
+[harness]
+version = "0.1.0"
+
+[doctor]
+# Las specs de docs/specs/ son registro historico de decisiones: no se reescriben.
+ignore = ["docs/specs/*"]

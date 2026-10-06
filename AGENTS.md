@@ -6,7 +6,7 @@ Este documento define el workflow y convenciones que todos los agentes de códig
 
 1. **GitHub es la fuente de verdad**: todos los issues, tareas y estado del proyecto viven en GitHub Issues
 2. **Cada cambio necesita un issue**: no commitear sin issue asociado
-3. **Nunca editar `backlog.md` a mano**: es generado automáticamente por `scripts/backlog.py`
+3. **Nunca editar `backlog.md` a mano**: es generado automáticamente por `harness`
 4. **Nunca commitear directamente a `main`**: siempre trabajar en ramas de feature
 5. **Tests antes de commitear**: verificar que `python3 -m unittest discover -s tests -v` pasa
 
@@ -20,7 +20,7 @@ Este documento define el workflow y convenciones que todos los agentes de códig
 ### 1. Tomar un issue
 
 ```bash
-python3 scripts/backlog.py take <N>
+harness take <N>
 ```
 
 Este comando ejecuta el flujo completo: **diseño → aprobación → implementación TDD**.
@@ -81,7 +81,7 @@ Para cada tarea pendiente, en orden:
      * Para archivos TS/JS: ESLint debe pasar en los archivos de test (si hay config eslint en el workspace). TypeScript compiler (`tsc --noEmit`) debe pasar, excepto por errores en los archivos de test que sean TS2307, TS2305, TS2724, TS2614 (missing module/export del código de producción) o TS2353/TS2345 (error de firma o tipo) **solo si el tipo nombrado en el mensaje de error está declarado en algún archivo de `impl_files` de la tarea** (extrae el tipo del mensaje: TS2353 'in type X', TS2345 'parameter of type X'; busca `interface X`, `type X`, o `class X` en impl_files). Para códigos sin tipo nombrado (TS2554, TS2339, TS2551, TS2741) se aceptan si el archivo de test importa un módulo que resuelve a un impl_file de la tarea. Esto distingue errores legítimos de firma propia vs errores de uso de librerías externas. Cualquier otro error de tsc en los archivos de test (ej: TS7006 implicit any, TS6133 unused variable) rechaza el RED.
      * Para archivos Python: `py_compile` debe pasar (sin SyntaxError).
      * Si falla la validación estática: no se revierte entre intentos; se pone feedback con el output exacto de la herramienta y se reintenta dentro del presupuesto de intentos. Solo al agotar intentos o si el usuario aborta se revierten todos los archivos cambiados. Si el usuario elige 'continuar', se commitea el estado actual pero se avisa explícitamente que los tests no pasan lint/typecheck.
-     * El harness detecta automáticamente **casts sobre argumentos completos** que esquivan errores de firma: rechaza líneas nuevas (líneas `+` de `git diff` para archivos trackeados; todas las líneas para archivos nuevos sin trackear) en archivos de test que contengan `} as never)`, `} as any)`, o `} as unknown as <ident>)`. **El rechazo ocurre solo si el callee (la función que recibe el cast) es un símbolo importado desde un `impl_file` de la tarea**. Casts sobre mocks y matchers de testing (ej: `mockResolvedValue({ data } as never)`) son aceptados. Casts sobre funciones propias del código de producción (ej: `buildApp({ db } as never)`) son rechazados. Casts por propiedad (`db: mockDb as never,`) y de variables (`fakeDb as never`) están permitidos. El feedback cita la línea rechazada. Igual que la validación estática, el rechazo por cast no revierte entre intentos: solo al agotar intentos o si el usuario aborta se revierten todos los archivos cambiados (tracked y nuevos); si elige 'continuar', se commitea con advertencia explícita. **Lista cerrada**: `KNOWN_EXTERNAL_CALLEES` (definida en `scripts/tdd_runner.py`) es el límite explícito entre "externo conocido" (se acepta en silencio) y "sospechoso" (se acepta con UNA advertencia). Se compara contra el ÚLTIMO segmento del callee (`vi.mocked(x).mockResolvedValue` cuenta como `mockResolvedValue`) y contiene exactamente: `mockResolvedValue`, `mockResolvedValueOnce`, `mockRejectedValue`, `mockRejectedValueOnce`, `mockReturnValue`, `mockReturnValueOnce`, `mockImplementation`, `mockImplementationOnce`, `toEqual`, `toStrictEqual`, `toBe`, `toMatchObject`, `toHaveBeenCalledWith`, `toHaveBeenLastCalledWith`, `spyOn`, `mocked`. Para ampliarla se edita en `scripts/tdd_runner.py` y acá. **Callee no resoluble**: se acepta con advertencia, impresa una sola vez por fase RED como "no pude determinar el callee del cast en <archivo>:<línea>, revisalo en el diff" (con "(+N más en el log de la tarea)" si hay varias); todas las advertencias se escriben en el log de la tarea bajo `.backlog/runs/issue-N/`. **Callees rechazados**: un símbolo importado desde un `impl_file` (también con alias: `import { x as y }`) y un método de ese símbolo (`api.build(...)`, `api.users.create(...)`), en cualquier posición de argumento (primero, segundo, tercero), también anidado en otra llamada como `expect(buildApp(...))`, en una línea o en varias. Si el último segmento está en `KNOWN_EXTERNAL_CALLEES` gana la lista: `api.build.mockReturnValue({ data } as never)` se acepta en silencio. **No son argumentos** y se aceptan en silencio: asignación (`const x = {...} as never`), `return {...} as never`, valor de propiedad (`key: {...} as never`), elemento de array y propiedad de objeto después de una coma. **Limitaciones conocidas (falsos negativos)**: el detector no maneja barrel files ni re-exports; si un test importa desde un barrel que re-exporta un símbolo de un impl_file, el callee no se clasificará correctamente y podría no rechazarse cuando debería. Tampoco resuelve alias locales de un símbolo importado (`const build = buildApp; build({...} as never)` solo da advertencia) ni imports de namespace o default (solo advertencia). Además, llaves o paréntesis dentro de strings, template literals o comentarios: el balanceo es textual y puede clasificar mal.
+     * El harness detecta automáticamente **casts sobre argumentos completos** que esquivan errores de firma: rechaza líneas nuevas (líneas `+` de `git diff` para archivos trackeados; todas las líneas para archivos nuevos sin trackear) en archivos de test que contengan `} as never)`, `} as any)`, o `} as unknown as <ident>)`. **El rechazo ocurre solo si el callee (la función que recibe el cast) es un símbolo importado desde un `impl_file` de la tarea**. Casts sobre mocks y matchers de testing (ej: `mockResolvedValue({ data } as never)`) son aceptados. Casts sobre funciones propias del código de producción (ej: `buildApp({ db } as never)`) son rechazados. Casts por propiedad (`db: mockDb as never,`) y de variables (`fakeDb as never`) están permitidos. El feedback cita la línea rechazada. Igual que la validación estática, el rechazo por cast no revierte entre intentos: solo al agotar intentos o si el usuario aborta se revierten todos los archivos cambiados (tracked y nuevos); si elige 'continuar', se commitea con advertencia explícita. **Lista cerrada**: `KNOWN_EXTERNAL_CALLEES` (definida en `src/harness/tdd_runner.py` del repo mblasi/harness) es el límite explícito entre "externo conocido" (se acepta en silencio) y "sospechoso" (se acepta con UNA advertencia). Se compara contra el ÚLTIMO segmento del callee (`vi.mocked(x).mockResolvedValue` cuenta como `mockResolvedValue`) y contiene exactamente: `mockResolvedValue`, `mockResolvedValueOnce`, `mockRejectedValue`, `mockRejectedValueOnce`, `mockReturnValue`, `mockReturnValueOnce`, `mockImplementation`, `mockImplementationOnce`, `toEqual`, `toStrictEqual`, `toBe`, `toMatchObject`, `toHaveBeenCalledWith`, `toHaveBeenLastCalledWith`, `spyOn`, `mocked`. Para ampliarla se edita en `src/harness/tdd_runner.py` de mblasi/harness y acá. **Callee no resoluble**: se acepta con advertencia, impresa una sola vez por fase RED como "no pude determinar el callee del cast en <archivo>:<línea>, revisalo en el diff" (con "(+N más en el log de la tarea)" si hay varias); todas las advertencias se escriben en el log de la tarea bajo `.harness/state/runs/issue-N/`. **Callees rechazados**: un símbolo importado desde un `impl_file` (también con alias: `import { x as y }`) y un método de ese símbolo (`api.build(...)`, `api.users.create(...)`), en cualquier posición de argumento (primero, segundo, tercero), también anidado en otra llamada como `expect(buildApp(...))`, en una línea o en varias. Si el último segmento está en `KNOWN_EXTERNAL_CALLEES` gana la lista: `api.build.mockReturnValue({ data } as never)` se acepta en silencio. **No son argumentos** y se aceptan en silencio: asignación (`const x = {...} as never`), `return {...} as never`, valor de propiedad (`key: {...} as never`), elemento de array y propiedad de objeto después de una coma. **Limitaciones conocidas (falsos negativos)**: el detector no maneja barrel files ni re-exports; si un test importa desde un barrel que re-exporta un símbolo de un impl_file, el callee no se clasificará correctamente y podría no rechazarse cuando debería. Tampoco resuelve alias locales de un símbolo importado (`const build = buildApp; build({...} as never)` solo da advertencia) ni imports de namespace o default (solo advertencia). Además, llaves o paréntesis dentro de strings, template literals o comentarios: el balanceo es textual y puede clasificar mal.
    - En el primer RED, muestra el output y pide confirmar que no es un error de infraestructura
    - Commit: `test: <tarea> (#N)`
 2. **GREEN**: invoca al agente: "implementá lo mínimo para que pasen los tests, sin modificar los tests". El prompt incluye `test_support_files` (pueden modificarse en GREEN) e `impl_files`.
@@ -141,7 +141,7 @@ En el primer intento de RED, si los tests pasan (cuando deberían fallar), el ha
 - Todos los tests pasan
 - Spec en estado `done`
 - Commit: `docs: spec completada (#N)`
-- Mensaje: "Siguiente paso: `python3 scripts/backlog.py pr N`"
+- Mensaje: "Siguiente paso: `harness pr N`"
 
 **Flags opcionales:**
 
@@ -151,7 +151,7 @@ En el primer intento de RED, si los tests pasan (cuando deberían fallar), el ha
 **Comandos relacionados:**
 
 ```bash
-python3 scripts/backlog.py impl <N>
+harness impl <N>
 ```
 
 Ejecuta solo la fase de implementación TDD (la spec debe estar en estado `approved` o `implementing`). Útil si interrumpiste `take` después de aprobar.
@@ -175,8 +175,8 @@ Ejecuta solo la fase de implementación TDD (la spec debe estar en estado `appro
 
 **Logs:**
 
-- Sesiones de diseño: `.backlog/sessions/<timestamp>.json` y `.md`
-- Logs de TDD: `.backlog/runs/issue-N/<task>-<fase>-<intento>.log`
+- Sesiones de diseño: `.harness/state/sessions/<timestamp>.json` y `.md`
+- Logs de TDD: `.harness/state/runs/issue-N/<task>-<fase>-<intento>.log`
 
 ### 3. Estructura de specs
 
@@ -216,7 +216,7 @@ Las specs se commitean en la rama del issue y se revisan en el PR.
 ### 4. Crear PR
 
 ```bash
-python3 scripts/backlog.py pr <N> [--draft]
+harness pr <N> [--draft]
 ```
 
 Este comando:
@@ -229,7 +229,7 @@ Este comando:
 ### 5. Merge
 
 ```bash
-python3 scripts/backlog.py merge <N>
+harness merge <N>
 ```
 
 Este comando:
@@ -245,7 +245,7 @@ Este comando:
 ### Ver estado actual
 
 ```bash
-python3 scripts/backlog.py status
+harness status
 ```
 
 Muestra rama actual, issue asociado, estado y labels.
@@ -253,8 +253,8 @@ Muestra rama actual, issue asociado, estado y labels.
 ### Listar issues
 
 ```bash
-python3 scripts/backlog.py list        # solo abiertos
-python3 scripts/backlog.py list --all  # todos
+harness list        # solo abiertos
+harness list --all  # todos
 ```
 
 ### Crear nuevo issue
@@ -262,7 +262,7 @@ python3 scripts/backlog.py list --all  # todos
 **Modo interactivo** (recomendado, con entrevista guiada por IA):
 
 ```bash
-python3 scripts/backlog.py new ["idea inicial opcional"]
+harness new ["idea inicial opcional"]
 ```
 
 El comando arranca una sesión interactiva con un agente Analista que te entrevista para crear una especificación completa. El agente:
@@ -279,7 +279,7 @@ Requisitos: `NOUS_API_KEY` en el environment o en `~/.config/model-keys.env`.
 **Modo no interactivo** (para scripts o cuando ya tenés la spec):
 
 ```bash
-python3 scripts/backlog.py new "Título del issue" \
+harness new "Título del issue" \
   --type {feat|fix|chore|docs|infra} \
   [--area web|api|agents|admin|infra] \
   [--phase {0|1|2|3}] \
@@ -291,20 +291,20 @@ python3 scripts/backlog.py new "Título del issue" \
 ### Inicializar labels y milestones (idempotente)
 
 ```bash
-python3 scripts/backlog.py init
+harness init
 ```
 
 ### Renderizar backlog.md
 
 ```bash
-python3 scripts/backlog.py render          # genera archivo
-python3 scripts/backlog.py render --check  # verifica si cambió (exit 1 si cambió)
+harness render          # genera archivo
+harness render --check  # verifica si cambió (exit 1 si cambió)
 ```
 
 ### Sincronizar backlog.md (solo desde main)
 
 ```bash
-python3 scripts/backlog.py sync
+harness sync
 ```
 
 Renderiza, commitea si cambió, pushea. Típicamente ejecutado por CI.
@@ -375,10 +375,10 @@ Renderiza, commitea si cambió, pushea. Típicamente ejecutado por CI.
 
 ```bash
 # 1. Ver issues disponibles
-python3 scripts/backlog.py list
+harness list
 
 # 2. Tomar issue #5
-python3 scripts/backlog.py take 5
+harness take 5
 # → Estás en rama issue/5-implement-login
 
 # 3. Implementar
@@ -393,10 +393,10 @@ git commit -m "feat: implement login form and auth flow (#5)"
 git commit -m "test: add integration tests for login (#5)"
 
 # 6. Crear PR
-python3 scripts/backlog.py pr 5
+harness pr 5
 
 # 7. Después de review y approval, mergear
-python3 scripts/backlog.py merge 5
+harness merge 5
 # → De vuelta en main, issue #5 cerrado
 ```
 

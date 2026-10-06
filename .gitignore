@@ -57,3 +57,4 @@ htmlcov/
 node_modules/
 .expo/
 *.tsbuildinfo
+.harness/state/
