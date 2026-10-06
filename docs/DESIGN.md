@@ -402,7 +402,7 @@ Fase 3 — Calidad y escala
 | 4 | Plataforma | Llegar a las stores (Expo + EAS); también web |
 | 5 | Monetización | Free trial + suscripción (§11) |
 | 6 | Wearables | No por ahora; no se descartan (Fase 3) |
-| 7 | Repo y flujo | github.com/mblasi/training · harness `scripts/backlog.py` (entrevista → spec → TDD) |
+| 7 | Repo y flujo | github.com/mblasi/training · harness compartido `mblasi/harness` (entrevista → spec → TDD) |
 | 8 | Profesionales humanos | Sí: marketplace + sugerencias de gimnasios y profesionales (§12) |
 | 9 | GCP | Proyecto nuevo y dedicado |
 

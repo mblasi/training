@@ -10,15 +10,15 @@ Gracias por contribuir al proyecto. Este documento resume el workflow de desarro
 
 ## Flujo de trabajo (resumen)
 
-1. **Crear issue** (opcional): `python3 scripts/backlog.py new` (modo interactivo con IA)
-2. **Tomar un issue**: `python3 scripts/backlog.py take <N>`
+1. **Crear issue** (opcional): `harness new` (modo interactivo con IA)
+2. **Tomar un issue**: `harness take <N>`
    - Crea rama `issue/<N>-<slug>`, marca como WIP
    - **Fase de diseño**: entrevista interactiva con agente Tech Lead
    - Genera `docs/specs/issue-N.md` con decisiones acordadas
    - **Fase TDD**: implementación automática con ciclo RED → GREEN → REFACTOR
    - Todos los tests pasan al finalizar
-3. **Crear PR**: `python3 scripts/backlog.py pr <N>`
-4. **Mergear** (después de review): `python3 scripts/backlog.py merge <N>`
+3. **Crear PR**: `harness pr <N>`
+4. **Mergear** (después de review): `harness merge <N>`
 
 Comandos opcionales:
 - `take <N> --plan-only`: solo diseño, sin implementación
@@ -43,7 +43,7 @@ Ver `AGENTS.md` para documentación completa del workflow, comandos disponibles,
 **Modo recomendado (interactivo con IA):**
 
 ```bash
-python3 scripts/backlog.py new ["idea inicial opcional"]
+harness new ["idea inicial opcional"]
 ```
 
 El agente Analista te entrevista y genera una especificación completa.
@@ -51,7 +51,7 @@ El agente Analista te entrevista y genera una especificación completa.
 **Modo directo (sin entrevista):**
 
 ```bash
-python3 scripts/backlog.py new "Título" --type {feat|fix|chore|docs|infra} --no-interview
+harness new "Título" --type {feat|fix|chore|docs|infra} --no-interview
 ```
 
 ## /DESVIO: regla para agentes de código

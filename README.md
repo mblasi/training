@@ -117,37 +117,37 @@ pnpm exec firebase emulators:exec --only auth --project demo-trainia "pnpm --fil
 
 ## Flujo de trabajo
 
-Este proyecto usa un workflow basado en GitHub Issues manejado por `scripts/backlog.py`.
+Este proyecto usa un workflow basado en GitHub Issues manejado por `harness`.
 
 ### Comandos principales
 
 ```bash
 # Ver issues disponibles
-python3 scripts/backlog.py list
+harness list
 
 # Crear nuevo issue (modo interactivo con agente IA)
-python3 scripts/backlog.py new
+harness new
 
 # Tomar un issue (diseño + implementación TDD automática)
-python3 scripts/backlog.py take <N>
+harness take <N>
 
 # Solo diseño (sin implementar)
-python3 scripts/backlog.py take <N> --plan-only
+harness take <N> --plan-only
 
 # Solo implementación (spec ya aprobada)
-python3 scripts/backlog.py impl <N>
+harness impl <N>
 
 # Crear PR
-python3 scripts/backlog.py pr <N>
+harness pr <N>
 
 # Mergear PR
-python3 scripts/backlog.py merge <N>
+harness merge <N>
 
 # Ver estado actual
-python3 scripts/backlog.py status
+harness status
 
 # Ver todos los comandos
-python3 scripts/backlog.py --help
+harness --help
 ```
 
 ### Workflow completo

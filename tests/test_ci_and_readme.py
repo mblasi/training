@@ -76,8 +76,8 @@ class TestCIWorkflowNodeJob(unittest.TestCase):
             "ci.yml debe configurar python-version: 3.12"
         )
         
-        # Debe contener py_compile y unittest discover
-        self.assertIn("py_compile", content, "ci.yml job 'test' debe ejecutar py_compile")
+        # Debe contener unittest discover (py_compile de scripts/ se fue con el harness local)
+        self.assertNotIn("py_compile", content, "ci.yml ya no debe compilar scripts/ (el harness vive en mblasi/harness)")
         self.assertIn("unittest discover", content, "ci.yml job 'test' debe ejecutar unittest discover")
 
 

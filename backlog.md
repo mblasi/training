@@ -1,10 +1,10 @@
 # Backlog
 
-> Generado automáticamente desde GitHub Issues por `scripts/backlog.py render`. No editar a mano.
+> Generado automáticamente desde GitHub Issues por `harness render`. No editar a mano.
 
 ## 🚧 En curso (WIP)
 
-_Nada por ahora._
+- [ ] [#42](https://github.com/mblasi/training/issues/42) Reemplazar el harness local por mblasi/harness v0.1.0 · chore · @mblasi
 
 ## 👀 En revisión
 
