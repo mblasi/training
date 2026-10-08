@@ -20,7 +20,7 @@ title = "Fase 3 - Calidad y escala"
 preset = "node-pnpm"
 
 [harness]
-version = "0.1.3"
+version = "0.1.6"
 
 [doctor]
 # Las specs de docs/specs/ son registro historico de decisiones: no se reescriben.
