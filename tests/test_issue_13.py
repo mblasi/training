@@ -80,5 +80,81 @@ class TestIssue13Task1(unittest.TestCase):
             )
 
 
+class TestIssue13Task2(unittest.TestCase):
+    """Tests para T2: Backend GCS y variables del entorno staging."""
+
+    @classmethod
+    def setUpClass(cls):
+        """Setup común: obtener la raíz del repo."""
+        cls.repo_root = Path(__file__).parent.parent
+        cls.infra_root = cls.repo_root / "infra"
+        cls.staging_dir = cls.infra_root / "envs" / "staging"
+        cls.backend_tf = cls.staging_dir / "backend.tf"
+        cls.variables_tf = cls.staging_dir / "variables.tf"
+
+    def test_backend_tf_uses_gcs(self):
+        """infra/envs/staging/backend.tf contiene 'gcs' y 'trainia-staging-tfstate'."""
+        self.assertTrue(
+            self.backend_tf.exists(),
+            "infra/envs/staging/backend.tf debe existir"
+        )
+
+        with open(self.backend_tf, 'r') as f:
+            backend_content = f.read()
+
+        self.assertIn(
+            'gcs',
+            backend_content,
+            "backend.tf debe contener 'gcs' como tipo de backend"
+        )
+        self.assertIn(
+            'trainia-staging-tfstate',
+            backend_content,
+            "backend.tf debe contener 'trainia-staging-tfstate' como nombre del bucket"
+        )
+
+    def test_backend_tf_has_prefix(self):
+        """infra/envs/staging/backend.tf contiene 'prefix' y 'envs/staging'."""
+        self.assertTrue(
+            self.backend_tf.exists(),
+            "infra/envs/staging/backend.tf debe existir"
+        )
+
+        with open(self.backend_tf, 'r') as f:
+            backend_content = f.read()
+
+        self.assertIn(
+            'prefix',
+            backend_content,
+            "backend.tf debe contener 'prefix'"
+        )
+        self.assertIn(
+            'envs/staging',
+            backend_content,
+            "backend.tf debe contener 'envs/staging' como valor del prefix"
+        )
+
+    def test_staging_variables_tf_declares_project_and_region(self):
+        """infra/envs/staging/variables.tf contiene las palabras 'project_id' y 'region' como declaraciones de variable."""
+        self.assertTrue(
+            self.variables_tf.exists(),
+            "infra/envs/staging/variables.tf debe existir"
+        )
+
+        with open(self.variables_tf, 'r') as f:
+            variables_content = f.read()
+
+        self.assertIn(
+            'project_id',
+            variables_content,
+            "variables.tf debe contener 'project_id' como declaración de variable"
+        )
+        self.assertIn(
+            'region',
+            variables_content,
+            "variables.tf debe contener 'region' como declaración de variable"
+        )
+
+
 if __name__ == '__main__':
     unittest.main()

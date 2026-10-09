@@ -100,7 +100,7 @@ infra/envs/staging/backend.tf con backend gcs bucket trainia-staging-tfstate; va
 - `infra/envs/staging/terraform.tfvars.example`
 
 **Progreso:**
-- [ ] RED: tests escritos y fallan
+- [x] RED: tests escritos y fallan
 - [ ] GREEN: tests pasan
 - [ ] REFACTOR: código limpio
 
