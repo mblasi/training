@@ -191,7 +191,7 @@ main.tf del entorno staging llama a los módulos cloudrun, cloudsql, wif y secre
 **Progreso:**
 - [x] RED: tests escritos y fallan
 - [x] GREEN: tests pasan
-- [ ] REFACTOR: código limpio
+- [x] REFACTOR: código limpio
 
 ### T8: Dockerfile multi-stage para apps/api
 
