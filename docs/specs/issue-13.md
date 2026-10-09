@@ -1,6 +1,6 @@
 ---
 issue: 13
-status: implementing
+status: done
 test_command: python3 -m unittest discover -s tests -v
 ---
 
