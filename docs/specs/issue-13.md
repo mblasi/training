@@ -136,7 +136,7 @@ infra/modules/secrets/main.tf con google_secret_manager_secret 'database-url' y 
 - `infra/modules/secrets/outputs.tf`
 
 **Progreso:**
-- [ ] RED: tests escritos y fallan
+- [x] RED: tests escritos y fallan
 - [ ] GREEN: tests pasan
 - [ ] REFACTOR: código limpio
 

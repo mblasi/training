@@ -201,5 +201,53 @@ class TestIssue13Task3(unittest.TestCase):
         )
 
 
+class TestIssue13Task4(unittest.TestCase):
+    """Tests para T4: Módulo secrets: Secret Manager + IAM accessor."""
+
+    @classmethod
+    def setUpClass(cls):
+        """Setup común: obtener la raíz del repo."""
+        cls.repo_root = Path(__file__).parent.parent
+        cls.infra_root = cls.repo_root / "infra"
+        cls.secrets_module_dir = cls.infra_root / "modules" / "secrets"
+        cls.secrets_main_tf = cls.secrets_module_dir / "main.tf"
+
+    def test_secrets_module_declares_database_url_secret(self):
+        """infra/modules/secrets/main.tf contiene 'database-url'."""
+        self.assertTrue(
+            self.secrets_main_tf.exists(),
+            "infra/modules/secrets/main.tf debe existir"
+        )
+
+        with open(self.secrets_main_tf, 'r') as f:
+            main_content = f.read()
+
+        self.assertIn(
+            'database-url',
+            main_content,
+            "infra/modules/secrets/main.tf debe contener 'database-url' como nombre del secreto"
+        )
+
+    def test_secrets_module_grants_secret_accessor(self):
+        """infra/modules/secrets/main.tf contiene 'secretmanager.secretAccessor' o 'roles/secretmanager.secretAccessor'."""
+        self.assertTrue(
+            self.secrets_main_tf.exists(),
+            "infra/modules/secrets/main.tf debe existir"
+        )
+
+        with open(self.secrets_main_tf, 'r') as f:
+            main_content = f.read()
+
+        has_secret_accessor = (
+            'secretmanager.secretAccessor' in main_content or
+            'roles/secretmanager.secretAccessor' in main_content
+        )
+
+        self.assertTrue(
+            has_secret_accessor,
+            "infra/modules/secrets/main.tf debe contener 'secretmanager.secretAccessor' o 'roles/secretmanager.secretAccessor' como rol IAM"
+        )
+
+
 if __name__ == '__main__':
     unittest.main()
