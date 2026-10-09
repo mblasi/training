@@ -138,7 +138,7 @@ infra/modules/secrets/main.tf con google_secret_manager_secret 'database-url' y 
 **Progreso:**
 - [x] RED: tests escritos y fallan
 - [x] GREEN: tests pasan
-- [ ] REFACTOR: código limpio
+- [x] REFACTOR: código limpio
 
 ### T5: Módulo wif: Workload Identity Federation para GitHub Actions
 
