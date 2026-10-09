@@ -172,7 +172,7 @@ infra/modules/cloudrun/main.tf con google_cloud_run_v2_service 'api', secreto DA
 - `infra/modules/cloudrun/outputs.tf`
 
 **Progreso:**
-- [ ] RED: tests escritos y fallan
+- [x] RED: tests escritos y fallan
 - [ ] GREEN: tests pasan
 - [ ] REFACTOR: código limpio
 

@@ -293,5 +293,55 @@ class TestIssue13Task5(unittest.TestCase):
         )
 
 
+class TestIssue13Task6(unittest.TestCase):
+    """Tests para T6: Módulo cloudrun: Cloud Run v2 + domain mapping."""
+
+    @classmethod
+    def setUpClass(cls):
+        """Setup común: obtener la raíz del repo."""
+        cls.repo_root = Path(__file__).parent.parent
+        cls.infra_root = cls.repo_root / "infra"
+        cls.cloudrun_module_dir = cls.infra_root / "modules" / "cloudrun"
+        cls.cloudrun_main_tf = cls.cloudrun_module_dir / "main.tf"
+
+    def test_cloudrun_module_has_cloud_run_v2_service(self):
+        """infra/modules/cloudrun/main.tf contiene 'google_cloud_run_v2_service'."""
+        self.assertTrue(
+            self.cloudrun_main_tf.exists(),
+            "infra/modules/cloudrun/main.tf debe existir"
+        )
+
+        with open(self.cloudrun_main_tf, 'r') as f:
+            main_content = f.read()
+
+        self.assertIn(
+            'google_cloud_run_v2_service',
+            main_content,
+            "infra/modules/cloudrun/main.tf debe contener 'google_cloud_run_v2_service' como recurso"
+        )
+
+    def test_cloudrun_module_has_domain_mapping(self):
+        """infra/modules/cloudrun/main.tf contiene 'google_cloud_run_domain_mapping' o 'google_cloud_run_v2_service' con custom_audiences o mapped_url; alternativamente contiene 'api.staging.trainia.blasi.ar'."""
+        self.assertTrue(
+            self.cloudrun_main_tf.exists(),
+            "infra/modules/cloudrun/main.tf debe existir"
+        )
+
+        with open(self.cloudrun_main_tf, 'r') as f:
+            main_content = f.read()
+
+        has_domain_mapping = (
+            'google_cloud_run_domain_mapping' in main_content or
+            'custom_audiences' in main_content or
+            'mapped_url' in main_content or
+            'api.staging.trainia.blasi.ar' in main_content
+        )
+
+        self.assertTrue(
+            has_domain_mapping,
+            "infra/modules/cloudrun/main.tf debe contener 'google_cloud_run_domain_mapping', 'custom_audiences', 'mapped_url', o 'api.staging.trainia.blasi.ar' para domain mapping"
+        )
+
+
 if __name__ == '__main__':
     unittest.main()
