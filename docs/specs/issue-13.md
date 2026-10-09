@@ -101,7 +101,7 @@ infra/envs/staging/backend.tf con backend gcs bucket trainia-staging-tfstate; va
 
 **Progreso:**
 - [x] RED: tests escritos y fallan
-- [ ] GREEN: tests pasan
+- [x] GREEN: tests pasan
 - [ ] REFACTOR: código limpio
 
 ### T3: Módulo cloudsql: Cloud SQL PG16 db-f1-micro
