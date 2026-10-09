@@ -208,7 +208,7 @@ apps/api/Dockerfile con stage build (node:24-alpine, copia monorepo, corepack en
 
 **Progreso:**
 - [x] RED: tests escritos y fallan
-- [ ] GREEN: tests pasan
+- [x] GREEN: tests pasan
 - [ ] REFACTOR: código limpio
 
 ### T9: docs/INFRA.md: costos, operación, rollback y WIF
