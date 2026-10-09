@@ -81,7 +81,7 @@ Crear infra/.opentofu-version y los archivos main.tf/variables.tf/outputs.tf de 
 - `infra/envs/staging/terraform.tfvars.example`
 
 **Progreso:**
-- [ ] RED: tests escritos y fallan
+- [x] RED: tests escritos y fallan
 - [ ] GREEN: tests pasan
 - [ ] REFACTOR: código limpio
 
