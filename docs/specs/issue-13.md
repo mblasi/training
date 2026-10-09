@@ -225,7 +225,7 @@ Crear docs/INFRA.md con secciones: Prerequisitos manuales (crear proyecto GCP, b
 - `docs/INFRA.md`
 
 **Progreso:**
-- [ ] RED: tests escritos y fallan
+- [x] RED: tests escritos y fallan
 - [ ] GREEN: tests pasan
 - [ ] REFACTOR: código limpio
 

@@ -460,5 +460,83 @@ class TestIssue13Task8(unittest.TestCase):
         )
 
 
+class TestIssue13Task9(unittest.TestCase):
+    """Tests para T9: docs/INFRA.md: costos, operación, rollback y WIF."""
+
+    @classmethod
+    def setUpClass(cls):
+        """Setup común: obtener la raíz del repo."""
+        cls.repo_root = Path(__file__).parent.parent
+        cls.infra_md = cls.repo_root / "docs" / "INFRA.md"
+
+    def test_infra_md_exists(self):
+        """docs/INFRA.md existe."""
+        self.assertTrue(
+            self.infra_md.exists(),
+            "docs/INFRA.md debe existir"
+        )
+
+    def test_infra_md_documents_costs(self):
+        """docs/INFRA.md contiene 'USD' o 'costo' o 'Cloud SQL' en alguna sección de costos."""
+        self.assertTrue(
+            self.infra_md.exists(),
+            "docs/INFRA.md debe existir"
+        )
+
+        with open(self.infra_md, 'r') as f:
+            infra_content = f.read()
+
+        has_costs_documentation = (
+            'USD' in infra_content or
+            'costo' in infra_content or
+            'Cloud SQL' in infra_content
+        )
+
+        self.assertTrue(
+            has_costs_documentation,
+            "docs/INFRA.md debe contener 'USD' o 'costo' o 'Cloud SQL' para documentar costos"
+        )
+
+    def test_infra_md_documents_rollback(self):
+        """docs/INFRA.md contiene 'rollback' o 'revertir' (case-insensitive)."""
+        self.assertTrue(
+            self.infra_md.exists(),
+            "docs/INFRA.md debe existir"
+        )
+
+        with open(self.infra_md, 'r') as f:
+            infra_content = f.read().lower()
+
+        has_rollback_documentation = (
+            'rollback' in infra_content or
+            'revertir' in infra_content
+        )
+
+        self.assertTrue(
+            has_rollback_documentation,
+            "docs/INFRA.md debe contener 'rollback' o 'revertir' para documentar rollback"
+        )
+
+    def test_infra_md_documents_workload_identity(self):
+        """docs/INFRA.md contiene 'Workload Identity' o 'workload_identity'."""
+        self.assertTrue(
+            self.infra_md.exists(),
+            "docs/INFRA.md debe existir"
+        )
+
+        with open(self.infra_md, 'r') as f:
+            infra_content = f.read()
+
+        has_wif_documentation = (
+            'Workload Identity' in infra_content or
+            'workload_identity' in infra_content
+        )
+
+        self.assertTrue(
+            has_wif_documentation,
+            "docs/INFRA.md debe contener 'Workload Identity' o 'workload_identity' para documentar WIF"
+        )
+
+
 if __name__ == '__main__':
     unittest.main()
