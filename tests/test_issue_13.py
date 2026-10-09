@@ -343,5 +343,55 @@ class TestIssue13Task6(unittest.TestCase):
         )
 
 
+class TestIssue13Task7(unittest.TestCase):
+    """Tests para T7: infra/envs/staging/main.tf: orquesta los 4 módulos."""
+
+    @classmethod
+    def setUpClass(cls):
+        """Setup común: obtener la raíz del repo."""
+        cls.repo_root = Path(__file__).parent.parent
+        cls.infra_root = cls.repo_root / "infra"
+        cls.staging_dir = cls.infra_root / "envs" / "staging"
+        cls.staging_main_tf = cls.staging_dir / "main.tf"
+
+    def test_staging_main_calls_all_four_modules(self):
+        """infra/envs/staging/main.tf contiene referencias a los 4 módulos: module 'cloudrun', 'cloudsql', 'wif', 'secrets' (o sus fuentes ../../../modules/...)."""
+        self.assertTrue(
+            self.staging_main_tf.exists(),
+            "infra/envs/staging/main.tf debe existir"
+        )
+
+        with open(self.staging_main_tf, 'r') as f:
+            main_content = f.read()
+
+        module_names = ['cloudrun', 'cloudsql', 'wif', 'secrets']
+        for module_name in module_names:
+            has_module = (
+                f'module "{module_name}"' in main_content or
+                f"module '{module_name}'" in main_content or
+                f'modules/{module_name}' in main_content
+            )
+            self.assertTrue(
+                has_module,
+                f"infra/envs/staging/main.tf debe contener referencia al módulo '{module_name}'"
+            )
+
+    def test_staging_main_has_google_provider(self):
+        """infra/envs/staging/main.tf contiene 'hashicorp/google' en required_providers."""
+        self.assertTrue(
+            self.staging_main_tf.exists(),
+            "infra/envs/staging/main.tf debe existir"
+        )
+
+        with open(self.staging_main_tf, 'r') as f:
+            main_content = f.read()
+
+        self.assertIn(
+            'hashicorp/google',
+            main_content,
+            "infra/envs/staging/main.tf debe contener 'hashicorp/google' en required_providers"
+        )
+
+
 if __name__ == '__main__':
     unittest.main()

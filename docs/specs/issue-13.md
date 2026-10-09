@@ -189,7 +189,7 @@ main.tf del entorno staging llama a los módulos cloudrun, cloudsql, wif y secre
 - `infra/envs/staging/outputs.tf`
 
 **Progreso:**
-- [ ] RED: tests escritos y fallan
+- [x] RED: tests escritos y fallan
 - [ ] GREEN: tests pasan
 - [ ] REFACTOR: código limpio
 
