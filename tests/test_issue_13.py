@@ -249,5 +249,49 @@ class TestIssue13Task4(unittest.TestCase):
         )
 
 
+class TestIssue13Task5(unittest.TestCase):
+    """Tests para T5: Módulo wif: Workload Identity Federation para GitHub Actions."""
+
+    @classmethod
+    def setUpClass(cls):
+        """Setup común: obtener la raíz del repo."""
+        cls.repo_root = Path(__file__).parent.parent
+        cls.infra_root = cls.repo_root / "infra"
+        cls.wif_module_dir = cls.infra_root / "modules" / "wif"
+        cls.wif_main_tf = cls.wif_module_dir / "main.tf"
+
+    def test_wif_module_has_workload_identity_pool(self):
+        """infra/modules/wif/main.tf contiene 'google_iam_workload_identity_pool'."""
+        self.assertTrue(
+            self.wif_main_tf.exists(),
+            "infra/modules/wif/main.tf debe existir"
+        )
+
+        with open(self.wif_main_tf, 'r') as f:
+            main_content = f.read()
+
+        self.assertIn(
+            'google_iam_workload_identity_pool',
+            main_content,
+            "infra/modules/wif/main.tf debe contener 'google_iam_workload_identity_pool' como recurso"
+        )
+
+    def test_wif_module_references_github(self):
+        """infra/modules/wif/main.tf contiene 'github' (provider OIDC de GitHub Actions)."""
+        self.assertTrue(
+            self.wif_main_tf.exists(),
+            "infra/modules/wif/main.tf debe existir"
+        )
+
+        with open(self.wif_main_tf, 'r') as f:
+            main_content = f.read()
+
+        self.assertIn(
+            'github',
+            main_content,
+            "infra/modules/wif/main.tf debe contener 'github' (provider OIDC de GitHub Actions)"
+        )
+
+
 if __name__ == '__main__':
     unittest.main()

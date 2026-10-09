@@ -154,7 +154,7 @@ infra/modules/wif/main.tf con google_iam_workload_identity_pool, google_iam_work
 - `infra/modules/wif/outputs.tf`
 
 **Progreso:**
-- [ ] RED: tests escritos y fallan
+- [x] RED: tests escritos y fallan
 - [ ] GREEN: tests pasan
 - [ ] REFACTOR: código limpio
 
