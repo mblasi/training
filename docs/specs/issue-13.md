@@ -119,7 +119,7 @@ infra/modules/cloudsql/main.tf con google_sql_database_instance (PG16, db-f1-mic
 
 **Progreso:**
 - [x] RED: tests escritos y fallan
-- [ ] GREEN: tests pasan
+- [x] GREEN: tests pasan
 - [ ] REFACTOR: código limpio
 
 ### T4: Módulo secrets: Secret Manager + IAM accessor
