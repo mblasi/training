@@ -83,7 +83,7 @@ Crear infra/.opentofu-version y los archivos main.tf/variables.tf/outputs.tf de 
 **Progreso:**
 - [x] RED: tests escritos y fallan
 - [x] GREEN: tests pasan
-- [ ] REFACTOR: código limpio
+- [x] REFACTOR: código limpio
 
 ### T2: Backend GCS y variables del entorno staging
 
