@@ -156,7 +156,7 @@ infra/modules/wif/main.tf con google_iam_workload_identity_pool, google_iam_work
 **Progreso:**
 - [x] RED: tests escritos y fallan
 - [x] GREEN: tests pasan
-- [ ] REFACTOR: código limpio
+- [x] REFACTOR: código limpio
 
 ### T6: Módulo cloudrun: Cloud Run v2 + domain mapping
 
