@@ -174,7 +174,7 @@ infra/modules/cloudrun/main.tf con google_cloud_run_v2_service 'api', secreto DA
 **Progreso:**
 - [x] RED: tests escritos y fallan
 - [x] GREEN: tests pasan
-- [ ] REFACTOR: código limpio
+- [x] REFACTOR: código limpio
 
 ### T7: infra/envs/staging/main.tf: orquesta los 4 módulos
 
