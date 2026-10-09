@@ -118,7 +118,7 @@ infra/modules/cloudsql/main.tf con google_sql_database_instance (PG16, db-f1-mic
 - `infra/modules/cloudsql/outputs.tf`
 
 **Progreso:**
-- [ ] RED: tests escritos y fallan
+- [x] RED: tests escritos y fallan
 - [ ] GREEN: tests pasan
 - [ ] REFACTOR: código limpio
 

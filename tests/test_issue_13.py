@@ -156,5 +156,50 @@ class TestIssue13Task2(unittest.TestCase):
         )
 
 
+class TestIssue13Task3(unittest.TestCase):
+    """Tests para T3: Módulo cloudsql: Cloud SQL PG16 db-f1-micro."""
+
+    @classmethod
+    def setUpClass(cls):
+        """Setup común: obtener la raíz del repo."""
+        cls.repo_root = Path(__file__).parent.parent
+        cls.infra_root = cls.repo_root / "infra"
+        cls.cloudsql_module_dir = cls.infra_root / "modules" / "cloudsql"
+        cls.cloudsql_main_tf = cls.cloudsql_module_dir / "main.tf"
+        cls.cloudsql_variables_tf = cls.cloudsql_module_dir / "variables.tf"
+
+    def test_cloudsql_module_uses_postgres16(self):
+        """infra/modules/cloudsql/main.tf contiene 'POSTGRES_16'."""
+        self.assertTrue(
+            self.cloudsql_main_tf.exists(),
+            "infra/modules/cloudsql/main.tf debe existir"
+        )
+
+        with open(self.cloudsql_main_tf, 'r') as f:
+            main_content = f.read()
+
+        self.assertIn(
+            'POSTGRES_16',
+            main_content,
+            "infra/modules/cloudsql/main.tf debe contener 'POSTGRES_16' como versión de la base de datos"
+        )
+
+    def test_cloudsql_module_has_tier_variable(self):
+        """infra/modules/cloudsql/variables.tf contiene variable 'tier' (permite sobrescribir db-f1-micro desde el entorno)."""
+        self.assertTrue(
+            self.cloudsql_variables_tf.exists(),
+            "infra/modules/cloudsql/variables.tf debe existir"
+        )
+
+        with open(self.cloudsql_variables_tf, 'r') as f:
+            variables_content = f.read()
+
+        self.assertIn(
+            'tier',
+            variables_content,
+            "infra/modules/cloudsql/variables.tf debe contener variable 'tier'"
+        )
+
+
 if __name__ == '__main__':
     unittest.main()
