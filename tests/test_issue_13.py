@@ -393,5 +393,72 @@ class TestIssue13Task7(unittest.TestCase):
         )
 
 
+class TestIssue13Task8(unittest.TestCase):
+    """Tests para T8: Dockerfile multi-stage para apps/api."""
+
+    @classmethod
+    def setUpClass(cls):
+        """Setup común: obtener la raíz del repo."""
+        cls.repo_root = Path(__file__).parent.parent
+        cls.api_dockerfile = cls.repo_root / "apps" / "api" / "Dockerfile"
+
+    def test_dockerfile_exists(self):
+        """apps/api/Dockerfile existe."""
+        self.assertTrue(
+            self.api_dockerfile.exists(),
+            "apps/api/Dockerfile debe existir"
+        )
+
+    def test_dockerfile_is_multistage(self):
+        """apps/api/Dockerfile contiene al menos 2 instrucciones FROM."""
+        self.assertTrue(
+            self.api_dockerfile.exists(),
+            "apps/api/Dockerfile debe existir"
+        )
+
+        with open(self.api_dockerfile, 'r') as f:
+            dockerfile_content = f.read()
+
+        from_count = len(re.findall(r'^\s*FROM\s+', dockerfile_content, re.MULTILINE | re.IGNORECASE))
+
+        self.assertGreaterEqual(
+            from_count,
+            2,
+            f"apps/api/Dockerfile debe contener al menos 2 instrucciones FROM (multistage), encontrado: {from_count}"
+        )
+
+    def test_dockerfile_uses_node24(self):
+        """apps/api/Dockerfile contiene 'node:24'."""
+        self.assertTrue(
+            self.api_dockerfile.exists(),
+            "apps/api/Dockerfile debe existir"
+        )
+
+        with open(self.api_dockerfile, 'r') as f:
+            dockerfile_content = f.read()
+
+        self.assertIn(
+            'node:24',
+            dockerfile_content,
+            "apps/api/Dockerfile debe contener 'node:24' como imagen base"
+        )
+
+    def test_dockerfile_uses_pnpm_deploy(self):
+        """apps/api/Dockerfile contiene 'pnpm deploy'."""
+        self.assertTrue(
+            self.api_dockerfile.exists(),
+            "apps/api/Dockerfile debe existir"
+        )
+
+        with open(self.api_dockerfile, 'r') as f:
+            dockerfile_content = f.read()
+
+        self.assertIn(
+            'pnpm deploy',
+            dockerfile_content,
+            "apps/api/Dockerfile debe contener 'pnpm deploy' para aislar dependencias de producción"
+        )
+
+
 if __name__ == '__main__':
     unittest.main()

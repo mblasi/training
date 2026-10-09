@@ -207,7 +207,7 @@ apps/api/Dockerfile con stage build (node:24-alpine, copia monorepo, corepack en
 - `apps/api/Dockerfile`
 
 **Progreso:**
-- [ ] RED: tests escritos y fallan
+- [x] RED: tests escritos y fallan
 - [ ] GREEN: tests pasan
 - [ ] REFACTOR: código limpio
 
