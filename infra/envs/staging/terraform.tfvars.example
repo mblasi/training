@@ -1,0 +1,7 @@
+# Example terraform.tfvars for staging environment
+# Copy this file to terraform.tfvars and fill in the values
+
+project_id        = "trainia-staging"
+region            = "us-central1"
+image_tag         = "latest"
+api_min_instances = 0
